@@ -53,6 +53,7 @@ CREATE TABLE airport_requirements (
   airport_code VARCHAR(3) NOT NULL,
   status TEXT NOT NULL,
   custom_note TEXT DEFAULT '',
+  updated_by TEXT DEFAULT '',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
   CONSTRAINT airport_req_unique UNIQUE(requirement_id, airport_code),

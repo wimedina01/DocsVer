@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom';
 import ChecklistPage from './pages/ChecklistPage';
 import QuickPrintPage from './pages/QuickPrintPage';
 import AdminPage from './pages/AdminPage';
+import StationMatrixPage from './pages/StationMatrixPage';
 import HistoryPage from './pages/HistoryPage';
 import PasswordGate from './components/PasswordGate';
 
@@ -25,6 +26,9 @@ export default function App() {
             <NavLink to="/history" className={({ isActive }) => isActive ? 'active' : ''}>
               History
             </NavLink>
+            <NavLink to="/station-matrix" className={({ isActive }) => isActive ? 'active' : ''}>
+              Station Matrix
+            </NavLink>
             <NavLink to="/admin" className={({ isActive }) => isActive ? 'active' : ''}>
               Admin
             </NavLink>
@@ -36,6 +40,7 @@ export default function App() {
             <Route path="/" element={<ChecklistPage />} />
             <Route path="/quick-print" element={<QuickPrintPage />} />
             <Route path="/history" element={<PasswordGate><HistoryPage /></PasswordGate>} />
+            <Route path="/station-matrix" element={<PasswordGate><StationMatrixPage /></PasswordGate>} />
             <Route path="/admin" element={<PasswordGate><AdminPage /></PasswordGate>} />
           </Routes>
         </main>
