@@ -316,7 +316,7 @@ export default function ChecklistPage() {
               className="form-input"
               placeholder="Type stations separated by spaces (e.g. IAH DEN BOG)"
               value={form.routing}
-              onChange={updateField('routing')}
+              onChange={(e) => setForm((prev) => ({ ...prev, routing: e.target.value.toUpperCase() }))}
               onBlur={handleRoutingBlur}
             />
           </div>
@@ -328,7 +328,7 @@ export default function ChecklistPage() {
               className="form-input"
               placeholder="Type flights separated by spaces (e.g. UA123 UA525)"
               value={form.flightNumbers}
-              onChange={updateField('flightNumbers')}
+              onChange={(e) => setForm((prev) => ({ ...prev, flightNumbers: e.target.value.toUpperCase() }))}
               onBlur={handleFlightsBlur}
             />
           </div>

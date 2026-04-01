@@ -31,9 +31,10 @@ export default function StationMatrixPage() {
   const [showCustomForm, setShowCustomForm] = useState(false);
   const [customDoc, setCustomDoc] = useState({ airport_code: '', document_name: '', custom_note: '', status: 'Required' });
 
-  // User ID for tracking
-  const [userId, setUserId] = useState(() => localStorage.getItem('hr_matrix_user') || '');
-  const [showUserPrompt, setShowUserPrompt] = useState(false);
+  // User ID for tracking — ALWAYS prompt on page load
+  const [userId, setUserId] = useState('');
+  const [showUserPrompt, setShowUserPrompt] = useState(true); // always show on mount
+  const [userIdInput, setUserIdInput] = useState(() => localStorage.getItem('hr_matrix_user') || ''); // pre-fill from last session
 
   const scrollRef = useRef(null);
 
@@ -61,7 +62,7 @@ export default function StationMatrixPage() {
 
   useEffect(() => { loadData(); }, []);
 
-  // ── Ensure user ID ──
+  // ── Ensure user ID — blocks action if not set ──
   const ensureUser = () => {
     if (userId) return true;
     setShowUserPrompt(true);
@@ -69,9 +70,12 @@ export default function StationMatrixPage() {
   };
 
   const saveUserId = (id) => {
-    setUserId(id);
-    localStorage.setItem('hr_matrix_user', id);
+    if (!id.trim()) return;
+    const clean = id.trim().toUpperCase();
+    setUserId(clean);
+    localStorage.setItem('hr_matrix_user', clean);
     setShowUserPrompt(false);
+    setUserIdInput('');
   };
 
   // ── Helpers ──
@@ -234,19 +238,47 @@ export default function StationMatrixPage() {
         </div>
       )}
 
-      {/* User ID prompt modal */}
+      {/* User ID prompt modal — CANNOT be dismissed without entering ID */}
       {showUserPrompt && (
-        <div className="modal-overlay" onClick={() => setShowUserPrompt(false)}>
+        <div className="modal-overlay">
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <h3 className="modal__title" style={{ color: 'var(--united-blue)' }}>Enter Your ID</h3>
-            <p className="modal__body">Enter your V or U number to track changes.</p>
-            <input type="text" className="form-input" placeholder="e.g. V12345" autoFocus
-              onKeyDown={e => { if (e.key === 'Enter' && e.target.value.trim()) saveUserId(e.target.value.trim().toUpperCase()); }} />
+            <h3 className="modal__title" style={{ color: 'var(--united-blue)' }}>
+              {userId ? 'Change Your ID' : 'Identification Required'}
+            </h3>
+            <div className="modal__body">
+              <p>
+                {userId
+                  ? 'Enter your new V or U number.'
+                  : 'You must enter your V or U number before making any changes. All edits will be tracked to your ID.'
+                }
+              </p>
+              <div className="form-group" style={{ marginTop: 16 }}>
+                <label className="form-label">Employee ID (V/U Number) *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. V12345 or U12345"
+                  value={userIdInput}
+                  onChange={e => setUserIdInput(e.target.value.toUpperCase())}
+                  onKeyDown={e => { if (e.key === 'Enter') saveUserId(userIdInput); }}
+                  autoFocus
+                  style={{ textAlign: 'center', fontSize: '18px', fontWeight: 600, letterSpacing: 1 }}
+                />
+              </div>
+            </div>
             <div className="button-row" style={{ marginTop: 16 }}>
-              <button className="btn btn--primary" onClick={() => {
-                const inp = document.querySelector('.modal input');
-                if (inp?.value.trim()) saveUserId(inp.value.trim().toUpperCase());
-              }}>Save</button>
+              {userId && (
+                <button className="btn btn--outline" onClick={() => { setShowUserPrompt(false); setUserIdInput(''); }}>
+                  Cancel
+                </button>
+              )}
+              <button
+                className="btn btn--primary"
+                onClick={() => saveUserId(userIdInput)}
+                disabled={!userIdInput.trim()}
+              >
+                {userId ? 'Update ID' : 'Continue'}
+              </button>
             </div>
           </div>
         </div>
