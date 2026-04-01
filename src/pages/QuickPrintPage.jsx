@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { generateChecklistPDF } from '../lib/pdfGenerator';
+import { generateBlankChecklistPDF } from '../lib/blankPdfGenerator';
 import { getAirportDisplay } from '../lib/airportCodes';
 
 export default function QuickPrintPage() {
@@ -99,22 +99,13 @@ export default function QuickPrintPage() {
   };
 
   const handlePrintBlank = () => {
-    const pdf = generateChecklistPDF({
-      awbNumber: '___-________',
-      origin: '',
-      originDisplay: '',
+    const pdf = generateBlankChecklistPDF({
       destination: destination.toUpperCase(),
       destinationDisplay: getAirportDisplay(destination),
-      routing: '',
-      flightNumbers: '',
-      shipmentType: '',
       remainsType,
       checklistItems: items,
-      notes: '',
-      employeeId: '',
-      submittedAt: null,
     });
-    pdf.save(`HR_Blank_Checklist_${destination.toUpperCase()}.pdf`);
+    pdf.save(`HR_Requirements_${destination.toUpperCase()}.pdf`);
   };
 
   return (
