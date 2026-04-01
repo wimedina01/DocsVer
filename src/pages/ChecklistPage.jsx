@@ -398,10 +398,21 @@ export default function ChecklistPage() {
                   )}
                   {item.custom_note && (
                     <div style={{
-                      fontSize: '0.78rem', color: 'var(--united-blue)', marginTop: 3,
-                      fontWeight: 500, fontStyle: 'italic',
+                      marginTop: 6,
+                      padding: '6px 10px',
+                      background: '#EBF2FE',
+                      border: '1px solid #276EF1',
+                      borderLeft: '4px solid #1414D2',
+                      borderRadius: '4px',
+                      fontSize: '0.82rem',
+                      color: '#051464',
+                      fontWeight: 600,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
                     }}>
-                      &#9733; {item.custom_note}
+                      <span style={{ fontSize: '1rem' }}>&#9888;</span>
+                      {item.custom_note}
                     </div>
                   )}
                 </td>
