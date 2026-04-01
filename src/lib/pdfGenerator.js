@@ -146,7 +146,9 @@ export function generateChecklistPDF(data) {
 
   const rows = checklistItems.map((item, i) => [
     (i + 1).toString(),
-    item.document_name,
+    item.custom_note
+      ? item.document_name + '\n  ★ ' + item.custom_note
+      : item.document_name,
     item.status || '',
     item.verification || '',
     '', // checkbox column

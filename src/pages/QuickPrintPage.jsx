@@ -36,24 +36,28 @@ export default function QuickPrintPage() {
 
       const { data: airportReqs } = await supabase
         .from('airport_requirements')
-        .select('requirement_id, status')
+        .select('requirement_id, status, custom_note')
         .eq('airport_code', dest);
 
       let result;
       if (airportReqs && airportReqs.length > 0) {
-        const airportMap = new Map(airportReqs.map((ar) => [ar.requirement_id, ar.status]));
+        const airportMap = new Map(airportReqs.map((ar) => [ar.requirement_id, { status: ar.status, custom_note: ar.custom_note }]));
         result = filtered
           .filter((req) => {
-            const status = airportMap.get(req.id);
-            return status && status !== 'Not Required';
+            const entry = airportMap.get(req.id);
+            return entry && entry.status !== 'Not Required';
           })
-          .map((req) => ({
-            requirement_id: req.id,
-            document_name: req.document_name,
-            description: req.description,
-            status: airportMap.get(req.id),
-            verification: '',
-          }));
+          .map((req) => {
+            const entry = airportMap.get(req.id);
+            return {
+              requirement_id: req.id,
+              document_name: req.document_name,
+              description: req.description,
+              status: entry.status,
+              custom_note: entry.custom_note || '',
+              verification: '',
+            };
+          });
       } else {
         const { data: defaults } = await supabase
           .from('default_requirements')
@@ -70,6 +74,7 @@ export default function QuickPrintPage() {
             document_name: req.document_name,
             description: req.description,
             status: defaultMap.get(req.id) || 'Required',
+            custom_note: '',
             verification: '',
           }));
       }
@@ -80,6 +85,7 @@ export default function QuickPrintPage() {
           document_name: req.document_name,
           description: req.description,
           status: 'Required',
+          custom_note: '',
           verification: '',
         }));
       }

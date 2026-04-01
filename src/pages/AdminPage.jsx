@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
+import { getAirportDisplay } from '../lib/airportCodes';
 
 export default function AdminPage() {
   const [requirements, setRequirements] = useState([]);
@@ -13,6 +14,9 @@ export default function AdminPage() {
   const [newAirport, setNewAirport] = useState('');
   const [selectedAirport, setSelectedAirport] = useState('');
 
+  // Track pending custom_note edits locally so we don't save on every keystroke
+  const [noteEdits, setNoteEdits] = useState({});
+
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
@@ -22,6 +26,7 @@ export default function AdminPage() {
       setRequirements(reqs || []);
       setAirportReqs(airReqs || []);
       setDefaults(defs || []);
+      setNoteEdits({}); // reset pending edits on reload
       const codes = [...new Set((airReqs || []).map((a) => a.airport_code))].sort();
       setAirports(codes);
       if (codes.length > 0 && !selectedAirport) setSelectedAirport(codes[0]);
@@ -34,6 +39,7 @@ export default function AdminPage() {
 
   useEffect(() => { loadData(); }, []);
 
+  // ── Add Requirement ──
   const handleAddRequirement = async () => {
     if (!newReq.document_name.trim()) return;
     setSaving(true);
@@ -53,6 +59,7 @@ export default function AdminPage() {
     } finally { setSaving(false); }
   };
 
+  // ── Toggle Active ──
   const handleToggleActive = async (req) => {
     try {
       await supabase.from('requirements_matrix').update({ is_active: !req.is_active }).eq('id', req.id);
@@ -60,6 +67,7 @@ export default function AdminPage() {
     } catch (err) { setMessage({ type: 'warning', text: 'Error: ' + err.message }); }
   };
 
+  // ── Delete Requirement ──
   const handleDeleteRequirement = async (id) => {
     if (!confirm('Delete this requirement?')) return;
     try {
@@ -69,6 +77,7 @@ export default function AdminPage() {
     } catch (err) { setMessage({ type: 'warning', text: 'Error: ' + err.message }); }
   };
 
+  // ── Update Default Status ──
   const handleUpdateDefault = async (requirementId, newStatus) => {
     try {
       const existing = defaults.find((d) => d.requirement_id === requirementId);
@@ -81,6 +90,7 @@ export default function AdminPage() {
     } catch (err) { setMessage({ type: 'warning', text: 'Error: ' + err.message }); }
   };
 
+  // ── Add Airport ──
   const handleAddAirport = async () => {
     const code = newAirport.toUpperCase().trim();
     if (code.length !== 3) { setMessage({ type: 'warning', text: 'Code must be 3 characters.' }); return; }
@@ -88,7 +98,7 @@ export default function AdminPage() {
     setSaving(true);
     try {
       const inserts = requirements.filter((r) => r.is_active).map((r) => ({
-        requirement_id: r.id, airport_code: code, status: 'Required',
+        requirement_id: r.id, airport_code: code, status: 'Required', custom_note: '',
       }));
       const { error } = await supabase.from('airport_requirements').insert(inserts);
       if (error) throw error;
@@ -100,18 +110,56 @@ export default function AdminPage() {
     finally { setSaving(false); }
   };
 
+  // ── Update Airport Status ──
   const handleUpdateAirportReq = async (requirementId, airportCode, newStatus) => {
     try {
       const existing = airportReqs.find((a) => a.requirement_id === requirementId && a.airport_code === airportCode);
       if (existing) {
         await supabase.from('airport_requirements').update({ status: newStatus }).eq('id', existing.id);
       } else {
-        await supabase.from('airport_requirements').insert({ requirement_id: requirementId, airport_code: airportCode, status: newStatus });
+        await supabase.from('airport_requirements').insert({ requirement_id: requirementId, airport_code: airportCode, status: newStatus, custom_note: '' });
       }
       await loadData();
     } catch (err) { setMessage({ type: 'warning', text: 'Error: ' + err.message }); }
   };
 
+  // ── Update Custom Note (on blur to avoid spamming DB) ──
+  const handleNoteChange = (reqId, value) => {
+    setNoteEdits((prev) => ({ ...prev, [reqId]: value }));
+  };
+
+  const handleNoteSave = async (requirementId, airportCode) => {
+    const noteValue = noteEdits[requirementId];
+    if (noteValue === undefined) return; // nothing changed
+
+    try {
+      const existing = airportReqs.find((a) => a.requirement_id === requirementId && a.airport_code === airportCode);
+      if (existing) {
+        await supabase.from('airport_requirements').update({ custom_note: noteValue }).eq('id', existing.id);
+      } else {
+        await supabase.from('airport_requirements').insert({
+          requirement_id: requirementId, airport_code: airportCode, status: 'Required', custom_note: noteValue,
+        });
+      }
+      // Update local state without full reload
+      setAirportReqs((prev) =>
+        prev.map((a) =>
+          a.requirement_id === requirementId && a.airport_code === airportCode
+            ? { ...a, custom_note: noteValue }
+            : a
+        )
+      );
+      setNoteEdits((prev) => {
+        const next = { ...prev };
+        delete next[requirementId];
+        return next;
+      });
+    } catch (err) {
+      setMessage({ type: 'warning', text: 'Error saving note: ' + err.message });
+    }
+  };
+
+  // ── Delete Airport ──
   const handleDeleteAirport = async (code) => {
     if (!confirm(`Delete all requirements for ${code}?`)) return;
     try {
@@ -122,8 +170,29 @@ export default function AdminPage() {
     } catch (err) { setMessage({ type: 'warning', text: 'Error: ' + err.message }); }
   };
 
-  const getDefaultStatus = (reqId) => { const d = defaults.find((d) => d.requirement_id === reqId); return d?.status || 'Required'; };
-  const getAirportStatus = (reqId, code) => { const a = airportReqs.find((a) => a.requirement_id === reqId && a.airport_code === code); return a?.status || 'Required'; };
+  // ── Helpers ──
+  const getDefaultStatus = (reqId) => {
+    const d = defaults.find((d) => d.requirement_id === reqId);
+    return d?.status || 'Required';
+  };
+
+  const getAirportStatus = (reqId, code) => {
+    const a = airportReqs.find((a) => a.requirement_id === reqId && a.airport_code === code);
+    return a?.status || 'Required';
+  };
+
+  const getAirportNote = (reqId, code) => {
+    // Return pending edit if exists, otherwise DB value
+    if (noteEdits[reqId] !== undefined) return noteEdits[reqId];
+    const a = airportReqs.find((a) => a.requirement_id === reqId && a.airport_code === code);
+    return a?.custom_note || '';
+  };
+
+  const APPLIES_LABELS = {
+    BOTH: 'Both',
+    HUMAN_REMAINS: 'Human Remains',
+    HUMAN_REMAINS_ASH: 'ASH',
+  };
 
   if (loading) return <div className="loading-center"><div className="spinner" /></div>;
 
@@ -136,46 +205,80 @@ export default function AdminPage() {
         </div>
       )}
 
+      {/* ═══ ADD NEW REQUIREMENT ═══ */}
       <div className="card">
         <h2 className="card__header">Add New Document Requirement</h2>
         <div className="form-grid">
           <div className="form-group">
             <label className="form-label">Document Name *</label>
-            <input type="text" className="form-input" placeholder="e.g. Consular Authorization" value={newReq.document_name} onChange={(e) => setNewReq((p) => ({ ...p, document_name: e.target.value }))} />
+            <input type="text" className="form-input" placeholder="e.g. Consular Authorization"
+              value={newReq.document_name}
+              onChange={(e) => setNewReq((p) => ({ ...p, document_name: e.target.value }))}
+            />
           </div>
           <div className="form-group">
             <label className="form-label">Applies To</label>
-            <select className="form-select" value={newReq.applies_to} onChange={(e) => setNewReq((p) => ({ ...p, applies_to: e.target.value }))}>
+            <select className="form-select" value={newReq.applies_to}
+              onChange={(e) => setNewReq((p) => ({ ...p, applies_to: e.target.value }))}>
               <option value="BOTH">Both (HR & ASH)</option>
-              <option value="HUMAN_REMAINS">Human Remains Only</option>
-              <option value="HUMAN_REMAINS_ASH">ASH Only</option>
-              <option value="ALL">All Types</option>
+              <option value="HUMAN_REMAINS">Human Remains</option>
+              <option value="HUMAN_REMAINS_ASH">Human Remains - ASH</option>
             </select>
           </div>
           <div className="form-group form-group--full">
             <label className="form-label">Description</label>
-            <input type="text" className="form-input" placeholder="Brief description" value={newReq.description} onChange={(e) => setNewReq((p) => ({ ...p, description: e.target.value }))} />
+            <input type="text" className="form-input" placeholder="Brief description"
+              value={newReq.description}
+              onChange={(e) => setNewReq((p) => ({ ...p, description: e.target.value }))}
+            />
           </div>
         </div>
         <div className="button-row">
-          <button className="btn btn--primary" onClick={handleAddRequirement} disabled={saving}>{saving ? 'Saving...' : 'Add Requirement'}</button>
+          <button className="btn btn--primary" onClick={handleAddRequirement} disabled={saving}>
+            {saving ? 'Saving...' : 'Add Requirement'}
+          </button>
         </div>
       </div>
 
+      {/* ═══ REQUIREMENTS LIST ═══ */}
       <div className="card">
         <h2 className="card__header">Document Requirements & Default Statuses</h2>
         <div style={{ overflowX: 'auto' }}>
           <table className="admin-table">
-            <thead><tr><th style={{ width: 40 }}>#</th><th>Document</th><th>Applies To</th><th style={{ width: 160 }}>Default Status</th><th style={{ width: 60 }}>Active</th><th style={{ width: 70 }}>Actions</th></tr></thead>
+            <thead>
+              <tr>
+                <th style={{ width: 40 }}>#</th>
+                <th>Document</th>
+                <th style={{ width: 120 }}>Applies To</th>
+                <th style={{ width: 160 }}>Default Status</th>
+                <th style={{ width: 60 }}>Active</th>
+                <th style={{ width: 70 }}>Actions</th>
+              </tr>
+            </thead>
             <tbody>
               {requirements.map((req, idx) => (
                 <tr key={req.id} style={{ opacity: req.is_active ? 1 : 0.5 }}>
                   <td>{idx + 1}</td>
-                  <td><strong>{req.document_name}</strong>{req.description && <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{req.description}</div>}</td>
-                  <td style={{ fontSize: '0.82rem' }}>{req.applies_to}</td>
-                  <td><select value={getDefaultStatus(req.id)} onChange={(e) => handleUpdateDefault(req.id, e.target.value)}><option value="Required">Required</option><option value="Required - Copies OK">Required - Copies OK</option><option value="Not Required">Not Required</option></select></td>
-                  <td style={{ textAlign: 'center' }}><input type="checkbox" checked={req.is_active} onChange={() => handleToggleActive(req)} style={{ cursor: 'pointer', width: 16, height: 16 }} /></td>
-                  <td><button className="btn btn--danger btn--sm" onClick={() => handleDeleteRequirement(req.id)}>Delete</button></td>
+                  <td>
+                    <strong>{req.document_name}</strong>
+                    {req.description && <div style={{ fontSize: '12px', color: 'var(--text-disabled)' }}>{req.description}</div>}
+                  </td>
+                  <td style={{ fontSize: '13px' }}>{APPLIES_LABELS[req.applies_to] || req.applies_to}</td>
+                  <td>
+                    <select value={getDefaultStatus(req.id)} onChange={(e) => handleUpdateDefault(req.id, e.target.value)}>
+                      <option value="Required">Required</option>
+                      <option value="Required - Copies OK">Required - Copies OK</option>
+                      <option value="Not Required">Not Required</option>
+                    </select>
+                  </td>
+                  <td style={{ textAlign: 'center' }}>
+                    <input type="checkbox" checked={req.is_active} onChange={() => handleToggleActive(req)}
+                      style={{ cursor: 'pointer', width: 18, height: 18, accentColor: 'var(--united-blue)' }}
+                    />
+                  </td>
+                  <td>
+                    <button className="btn btn--danger btn--sm" onClick={() => handleDeleteRequirement(req.id)}>Delete</button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -183,43 +286,106 @@ export default function AdminPage() {
         </div>
       </div>
 
+      {/* ═══ AIRPORT-SPECIFIC REQUIREMENTS ═══ */}
       <div className="card">
         <h2 className="card__header">Airport-Specific Requirements</h2>
+
+        <p style={{ color: 'var(--text-secondary)', fontSize: '14px', lineHeight: '24px', marginBottom: 16 }}>
+          Configure destination-specific document requirements. Use the <strong>Custom Note</strong> column
+          for special instructions — e.g. "Must be translated to Japanese", "Apostille required",
+          "Notarized copy in Spanish". These notes will appear on the checklist and PDF.
+        </p>
+
+        {/* Add / Select Airport */}
         <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 20, flexWrap: 'wrap' }}>
           <div className="form-group" style={{ flex: '0 0 120px' }}>
             <label className="form-label">Add Airport</label>
-            <input type="text" className="form-input" placeholder="e.g. NRT" maxLength={3} value={newAirport} onChange={(e) => setNewAirport(e.target.value.toUpperCase())} />
+            <input type="text" className="form-input" placeholder="e.g. NRT" maxLength={3}
+              value={newAirport} onChange={(e) => setNewAirport(e.target.value.toUpperCase())}
+            />
           </div>
-          <button className="btn btn--gold btn--sm" onClick={handleAddAirport} disabled={saving} style={{ marginBottom: 1 }}>+ Add</button>
+          <button className="btn btn--primary btn--sm" onClick={handleAddAirport} disabled={saving}
+            style={{ marginBottom: 1 }}>+ Add</button>
+
           {airports.length > 0 && (
             <>
-              <div className="form-group" style={{ flex: '0 0 160px', marginLeft: 24 }}>
+              <div className="form-group" style={{ flex: '0 0 200px', marginLeft: 24 }}>
                 <label className="form-label">View Airport</label>
-                <select className="form-select" value={selectedAirport} onChange={(e) => setSelectedAirport(e.target.value)}>
-                  {airports.map((code) => <option key={code} value={code}>{code}</option>)}
+                <select className="form-select" value={selectedAirport}
+                  onChange={(e) => { setSelectedAirport(e.target.value); setNoteEdits({}); }}>
+                  {airports.map((code) => (
+                    <option key={code} value={code}>{getAirportDisplay(code)}</option>
+                  ))}
                 </select>
               </div>
-              <button className="btn btn--danger btn--sm" onClick={() => handleDeleteAirport(selectedAirport)} style={{ marginBottom: 1 }}>Delete {selectedAirport}</button>
+              <button className="btn btn--danger btn--sm" onClick={() => handleDeleteAirport(selectedAirport)}
+                style={{ marginBottom: 1 }}>Delete {selectedAirport}</button>
             </>
           )}
         </div>
+
+        {/* Airport Matrix Table */}
         {selectedAirport && (
           <div style={{ overflowX: 'auto' }}>
             <table className="admin-table">
-              <thead><tr><th>Document</th><th style={{ width: 200 }}>Status for {selectedAirport}</th></tr></thead>
+              <thead>
+                <tr>
+                  <th style={{ width: '30%' }}>Document</th>
+                  <th style={{ width: '30%' }}>Custom Note</th>
+                  <th style={{ width: '25%' }}>Status for {selectedAirport}</th>
+                </tr>
+              </thead>
               <tbody>
                 {requirements.filter((r) => r.is_active).map((req) => (
                   <tr key={req.id}>
-                    <td>{req.document_name}</td>
-                    <td><select value={getAirportStatus(req.id, selectedAirport)} onChange={(e) => handleUpdateAirportReq(req.id, selectedAirport, e.target.value)}><option value="Required">Required</option><option value="Required - Copies OK">Required - Copies OK</option><option value="Not Required">Not Required</option></select></td>
+                    <td>
+                      <strong>{req.document_name}</strong>
+                      {req.description && (
+                        <div style={{ fontSize: '11px', color: 'var(--text-disabled)', marginTop: 2 }}>
+                          {req.description}
+                        </div>
+                      )}
+                    </td>
+                    <td>
+                      <input
+                        type="text"
+                        placeholder="e.g. Translated to Japanese, Apostille required..."
+                        value={getAirportNote(req.id, selectedAirport)}
+                        onChange={(e) => handleNoteChange(req.id, e.target.value)}
+                        onBlur={() => handleNoteSave(req.id, selectedAirport)}
+                        style={{
+                          width: '100%',
+                          padding: '6px 10px',
+                          border: '1px solid var(--border-default)',
+                          borderRadius: 'var(--radius-field)',
+                          fontFamily: 'var(--font-body)',
+                          fontSize: '13px',
+                          color: getAirportNote(req.id, selectedAirport) ? 'var(--text-primary)' : 'var(--text-placeholder)',
+                        }}
+                      />
+                    </td>
+                    <td>
+                      <select
+                        value={getAirportStatus(req.id, selectedAirport)}
+                        onChange={(e) => handleUpdateAirportReq(req.id, selectedAirport, e.target.value)}
+                      >
+                        <option value="Required">Required</option>
+                        <option value="Required - Copies OK">Required - Copies OK</option>
+                        <option value="Not Required">Not Required</option>
+                      </select>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         )}
+
         {airports.length === 0 && (
-          <div className="alert alert--info">No airport-specific requirements configured. Add an airport code above. Destinations without configurations will use the default checklist.</div>
+          <div className="alert alert--info">
+            No airport-specific requirements configured. Add an airport code above.
+            Destinations without configurations will use the default checklist.
+          </div>
         )}
       </div>
     </>

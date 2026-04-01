@@ -106,26 +106,30 @@ export default function ChecklistPage() {
 
       const { data: airportReqs, error: airErr } = await supabase
         .from('airport_requirements')
-        .select('requirement_id, status')
+        .select('requirement_id, status, custom_note')
         .eq('airport_code', dest);
 
       if (airErr) throw airErr;
 
       let items;
       if (airportReqs && airportReqs.length > 0) {
-        const airportMap = new Map(airportReqs.map((ar) => [ar.requirement_id, ar.status]));
+        const airportMap = new Map(airportReqs.map((ar) => [ar.requirement_id, { status: ar.status, custom_note: ar.custom_note }]));
         items = filtered
           .filter((req) => {
-            const status = airportMap.get(req.id);
-            return status && status !== 'Not Required';
+            const entry = airportMap.get(req.id);
+            return entry && entry.status !== 'Not Required';
           })
-          .map((req) => ({
-            requirement_id: req.id,
-            document_name: req.document_name,
-            description: req.description,
-            status: airportMap.get(req.id),
-            verification: '',
-          }));
+          .map((req) => {
+            const entry = airportMap.get(req.id);
+            return {
+              requirement_id: req.id,
+              document_name: req.document_name,
+              description: req.description,
+              status: entry.status,
+              custom_note: entry.custom_note || '',
+              verification: '',
+            };
+          });
       } else {
         const { data: defaults, error: defErr } = await supabase
           .from('default_requirements')
@@ -144,6 +148,7 @@ export default function ChecklistPage() {
             document_name: req.document_name,
             description: req.description,
             status: defaultMap.get(req.id) || 'Required',
+            custom_note: '',
             verification: '',
           }));
       }
@@ -154,6 +159,7 @@ export default function ChecklistPage() {
           document_name: req.document_name,
           description: req.description,
           status: 'Required',
+          custom_note: '',
           verification: '',
         }));
       }
@@ -388,6 +394,14 @@ export default function ChecklistPage() {
                   {item.description && (
                     <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 2 }}>
                       {item.description}
+                    </div>
+                  )}
+                  {item.custom_note && (
+                    <div style={{
+                      fontSize: '0.78rem', color: 'var(--united-blue)', marginTop: 3,
+                      fontWeight: 500, fontStyle: 'italic',
+                    }}>
+                      &#9733; {item.custom_note}
                     </div>
                   )}
                 </td>

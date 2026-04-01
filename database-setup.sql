@@ -52,6 +52,7 @@ CREATE TABLE airport_requirements (
   requirement_id UUID NOT NULL REFERENCES requirements_matrix(id) ON DELETE CASCADE,
   airport_code VARCHAR(3) NOT NULL,
   status TEXT NOT NULL,
+  custom_note TEXT DEFAULT '',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
   CONSTRAINT airport_req_unique UNIQUE(requirement_id, airport_code),
