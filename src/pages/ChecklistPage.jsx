@@ -59,6 +59,9 @@ export default function ChecklistPage() {
   const [modalType, setModalType] = useState('');
   const [employeeId, setEmployeeId] = useState('');
 
+  // Edit summary toggle
+  const [editingSummary, setEditingSummary] = useState(false);
+
   // ── FORM HANDLERS ──
   const updateField = (field) => (e) => {
     setForm((prev) => ({ ...prev, [field]: e.target.value }));
@@ -346,7 +349,6 @@ export default function ChecklistPage() {
   // ═══════════════════════════════════════
   //  CHECKLIST VIEW
   // ═══════════════════════════════════════
-  const [editingSummary, setEditingSummary] = useState(false);
 
   return (
     <>
