@@ -12,9 +12,12 @@ export default function App() {
     <BrowserRouter>
       <div className="app-shell">
         <header className="app-header">
-          <div>
-            <div className="app-header__title">United Cargo — HR Document Verification</div>
-            <div className="app-header__subtitle">Human Remains Checklist System</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <img src="/united-cargo-logo.png" alt="United Cargo" style={{ height: 38 }} />
+            <div>
+              <div className="app-header__title">HR Document Verification</div>
+              <div className="app-header__subtitle">Human Remains Checklist System</div>
+            </div>
           </div>
           <nav className="app-header__nav">
             <NavLink to="/" end className={({ isActive }) => isActive ? 'active' : ''}>

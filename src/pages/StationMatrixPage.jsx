@@ -21,6 +21,9 @@ export default function StationMatrixPage() {
   const [searchDoc, setSearchDoc] = useState('');
   const [searchStation, setSearchStation] = useState('');
 
+  // Expand matrix
+  const [expanded, setExpanded] = useState(false);
+
   // Add station
   const [newAirport, setNewAirport] = useState('');
 
@@ -285,7 +288,11 @@ export default function StationMatrixPage() {
       )}
 
       {/* ── TOOLBAR ── */}
-      <div className="card">
+      <div className="card" style={expanded ? {
+        position: 'fixed', inset: 0, zIndex: 50, borderRadius: 0,
+        margin: 0, maxWidth: '100%', overflow: 'auto',
+        display: 'flex', flexDirection: 'column',
+      } : {}}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
           <h2 className="card__header" style={{ marginBottom: 0, paddingBottom: 0, borderBottom: 'none' }}>
             Station Requirements Matrix
@@ -298,6 +305,13 @@ export default function StationMatrixPage() {
             ) : (
               <button className="btn btn--outline btn--sm" onClick={() => setShowUserPrompt(true)}>Set User ID</button>
             )}
+            <button
+              className="btn btn--outline btn--sm"
+              onClick={() => setExpanded(!expanded)}
+              title={expanded ? 'Exit fullscreen' : 'Expand matrix'}
+            >
+              {expanded ? '✕ Close' : '⛶ Expand'}
+            </button>
           </div>
         </div>
 
@@ -367,7 +381,12 @@ export default function StationMatrixPage() {
 
         {/* ── MATRIX TABLE ── */}
         {filteredAirports.length > 0 ? (
-          <div ref={scrollRef} style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: '65vh', border: '1px solid #D7D7D4', borderRadius: 10 }}>
+          <div ref={scrollRef} style={{
+            overflowX: 'auto', overflowY: 'auto',
+            maxHeight: expanded ? 'calc(100vh - 220px)' : '65vh',
+            border: '1px solid #D7D7D4', borderRadius: 10,
+            flex: expanded ? 1 : undefined,
+          }}>
             <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: 220 + filteredAirports.length * CELL_W }}>
               <thead>
                 <tr>

@@ -2,6 +2,11 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 
 const STATUS_OPTIONS = ['Required', 'Required - Copies OK', 'Not Required'];
+const APPLIES_OPTIONS = [
+  { value: 'BOTH', label: 'Both (HR & ASH)' },
+  { value: 'HUMAN_REMAINS', label: 'Human Remains' },
+  { value: 'HUMAN_REMAINS_ASH', label: 'Human Remains - ASH' },
+];
 const APPLIES_LABELS = { BOTH: 'Both', HUMAN_REMAINS: 'Human Remains', HUMAN_REMAINS_ASH: 'ASH' };
 
 export default function AdminPage() {
@@ -11,6 +16,10 @@ export default function AdminPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
   const [newReq, setNewReq] = useState({ document_name: '', description: '', applies_to: 'BOTH' });
+
+  // Track which row is being edited
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState({ document_name: '', description: '', applies_to: '' });
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -31,6 +40,7 @@ export default function AdminPage() {
     setTimeout(() => setMessage({ type: '', text: '' }), 4000);
   };
 
+  // ── Add Requirement ──
   const handleAddRequirement = async () => {
     if (!newReq.document_name.trim()) return;
     setSaving(true);
@@ -49,6 +59,45 @@ export default function AdminPage() {
     finally { setSaving(false); }
   };
 
+  // ── Start Editing ──
+  const startEdit = (req) => {
+    setEditingId(req.id);
+    setEditForm({
+      document_name: req.document_name,
+      description: req.description || '',
+      applies_to: req.applies_to,
+    });
+  };
+
+  // ── Save Edit ──
+  const saveEdit = async (id) => {
+    if (!editForm.document_name.trim()) {
+      flash('warning', 'Document name cannot be empty.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const { error } = await supabase.from('requirements_matrix').update({
+        document_name: editForm.document_name,
+        description: editForm.description,
+        applies_to: editForm.applies_to,
+        updated_at: new Date().toISOString(),
+      }).eq('id', id);
+      if (error) throw error;
+      setEditingId(null);
+      flash('success', 'Requirement updated.');
+      await loadData();
+    } catch (err) { flash('warning', 'Error: ' + err.message); }
+    finally { setSaving(false); }
+  };
+
+  // ── Cancel Edit ──
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditForm({ document_name: '', description: '', applies_to: '' });
+  };
+
+  // ── Toggle Active ──
   const handleToggleActive = async (req) => {
     try {
       await supabase.from('requirements_matrix').update({ is_active: !req.is_active }).eq('id', req.id);
@@ -56,6 +105,7 @@ export default function AdminPage() {
     } catch (err) { flash('warning', 'Error: ' + err.message); }
   };
 
+  // ── Delete ──
   const handleDeleteRequirement = async (id) => {
     if (!confirm('Delete this requirement? This will remove it from all stations.')) return;
     try {
@@ -65,6 +115,7 @@ export default function AdminPage() {
     } catch (err) { flash('warning', 'Error: ' + err.message); }
   };
 
+  // ── Update Default ──
   const handleUpdateDefault = async (reqId, newStatus) => {
     try {
       const existing = defaults.find(d => d.requirement_id === reqId);
@@ -87,6 +138,7 @@ export default function AdminPage() {
         </div>
       )}
 
+      {/* ═══ ADD NEW REQUIREMENT ═══ */}
       <div className="card">
         <h2 className="card__header">Add New Document Requirement</h2>
         <div className="form-grid">
@@ -98,9 +150,7 @@ export default function AdminPage() {
           <div className="form-group">
             <label className="form-label">Applies To</label>
             <select className="form-select" value={newReq.applies_to} onChange={e => setNewReq(p => ({ ...p, applies_to: e.target.value }))}>
-              <option value="BOTH">Both (HR & ASH)</option>
-              <option value="HUMAN_REMAINS">Human Remains</option>
-              <option value="HUMAN_REMAINS_ASH">Human Remains - ASH</option>
+              {APPLIES_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
           <div className="form-group form-group--full">
@@ -116,11 +166,12 @@ export default function AdminPage() {
         </div>
       </div>
 
+      {/* ═══ REQUIREMENTS TABLE ═══ */}
       <div className="card">
         <h2 className="card__header">Document Requirements & Default Statuses</h2>
         <p style={{ color: 'var(--text-secondary)', fontSize: 14, marginBottom: 16 }}>
-          These are the default document requirements. To configure station-specific overrides,
-          go to the <strong>Station Matrix</strong> page.
+          Click <strong>Edit</strong> on any row to fix typos or update details. For station-specific
+          overrides, go to the <strong>Station Matrix</strong> page.
         </p>
         <div style={{ overflowX: 'auto' }}>
           <table className="admin-table">
@@ -131,32 +182,89 @@ export default function AdminPage() {
                 <th style={{ width: 100 }}>Applies To</th>
                 <th style={{ width: 155 }}>Default Status</th>
                 <th style={{ width: 50 }}>Active</th>
-                <th style={{ width: 65 }}></th>
+                <th style={{ width: 120 }}></th>
               </tr>
             </thead>
             <tbody>
-              {requirements.map((req, idx) => (
-                <tr key={req.id} style={{ opacity: req.is_active ? 1 : 0.45 }}>
-                  <td style={{ textAlign: 'center' }}>{idx + 1}</td>
-                  <td>
-                    <strong>{req.document_name}</strong>
-                    {req.description && <div style={{ fontSize: 12, color: 'var(--text-disabled)' }}>{req.description}</div>}
-                  </td>
-                  <td style={{ fontSize: 13 }}>{APPLIES_LABELS[req.applies_to] || req.applies_to}</td>
-                  <td>
-                    <select value={getDefaultStatus(req.id)} onChange={e => handleUpdateDefault(req.id, e.target.value)}>
-                      {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </td>
-                  <td style={{ textAlign: 'center' }}>
-                    <input type="checkbox" checked={req.is_active} onChange={() => handleToggleActive(req)}
-                      style={{ cursor: 'pointer', width: 18, height: 18, accentColor: 'var(--united-blue)' }} />
-                  </td>
-                  <td>
-                    <button className="btn btn--danger btn--sm" onClick={() => handleDeleteRequirement(req.id)}>Delete</button>
-                  </td>
-                </tr>
-              ))}
+              {requirements.map((req, idx) => {
+                const isEditing = editingId === req.id;
+
+                return (
+                  <tr key={req.id} style={{ opacity: req.is_active ? 1 : 0.45 }}>
+                    <td style={{ textAlign: 'center' }}>{idx + 1}</td>
+
+                    {/* ── Document Name + Description ── */}
+                    <td>
+                      {isEditing ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          <input type="text" className="form-input" value={editForm.document_name}
+                            onChange={e => setEditForm(p => ({ ...p, document_name: e.target.value }))}
+                            style={{ fontWeight: 600, fontSize: 14, padding: '6px 10px' }}
+                            autoFocus />
+                          <input type="text" className="form-input" value={editForm.description}
+                            onChange={e => setEditForm(p => ({ ...p, description: e.target.value }))}
+                            placeholder="Description (optional)"
+                            style={{ fontSize: 12, padding: '5px 10px' }} />
+                        </div>
+                      ) : (
+                        <>
+                          <strong>{req.document_name}</strong>
+                          {req.description && <div style={{ fontSize: 12, color: 'var(--text-disabled)' }}>{req.description}</div>}
+                        </>
+                      )}
+                    </td>
+
+                    {/* ── Applies To ── */}
+                    <td>
+                      {isEditing ? (
+                        <select className="form-select" value={editForm.applies_to}
+                          onChange={e => setEditForm(p => ({ ...p, applies_to: e.target.value }))}
+                          style={{ fontSize: 12, padding: '5px 6px' }}>
+                          {APPLIES_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                        </select>
+                      ) : (
+                        <span style={{ fontSize: 13 }}>{APPLIES_LABELS[req.applies_to] || req.applies_to}</span>
+                      )}
+                    </td>
+
+                    {/* ── Default Status ── */}
+                    <td>
+                      <select value={getDefaultStatus(req.id)} onChange={e => handleUpdateDefault(req.id, e.target.value)}>
+                        {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </td>
+
+                    {/* ── Active ── */}
+                    <td style={{ textAlign: 'center' }}>
+                      <input type="checkbox" checked={req.is_active} onChange={() => handleToggleActive(req)}
+                        style={{ cursor: 'pointer', width: 18, height: 18, accentColor: 'var(--united-blue)' }} />
+                    </td>
+
+                    {/* ── Actions ── */}
+                    <td>
+                      {isEditing ? (
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <button className="btn btn--primary btn--sm" onClick={() => saveEdit(req.id)} disabled={saving}>
+                            Save
+                          </button>
+                          <button className="btn btn--outline btn--sm" onClick={cancelEdit}>
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <button className="btn btn--outline btn--sm" onClick={() => startEdit(req)}>
+                            Edit
+                          </button>
+                          <button className="btn btn--danger btn--sm" onClick={() => handleDeleteRequirement(req.id)}>
+                            Delete
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

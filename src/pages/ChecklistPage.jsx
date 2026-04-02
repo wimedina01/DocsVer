@@ -332,14 +332,6 @@ export default function ChecklistPage() {
               onBlur={handleFlightsBlur}
             />
           </div>
-
-          <div className="form-group">
-            <label className="form-label">Origin or Transit</label>
-            <select className="form-select" value={form.shipmentType} onChange={updateField('shipmentType')}>
-              <option value="Origin">Origin</option>
-              <option value="Transit">Transit</option>
-            </select>
-          </div>
         </div>
 
         <div className="button-row">
@@ -354,21 +346,71 @@ export default function ChecklistPage() {
   // ═══════════════════════════════════════
   //  CHECKLIST VIEW
   // ═══════════════════════════════════════
+  const [editingSummary, setEditingSummary] = useState(false);
+
   return (
     <>
       {/* Shipment Summary */}
       <div className="card">
-        <h2 className="card__header">Shipment Summary</h2>
-        <div className="form-grid" style={{ gap: '8px 24px' }}>
-          <div><span className="form-label">AWB: </span><strong>{form.awbNumber}</strong></div>
-          <div><span className="form-label">Type: </span><strong>{form.remainsType}</strong></div>
-          <div><span className="form-label">Origin: </span><strong>{getAirportDisplay(form.origin)}</strong></div>
-          <div><span className="form-label">Destination: </span><strong>{getAirportDisplay(form.destination)}</strong></div>
-          <div><span className="form-label">Routing: </span><strong>{form.routing || '—'}</strong></div>
-          <div><span className="form-label">Flights: </span><strong>{form.flightNumbers || '—'}</strong></div>
-          <div><span className="form-label">Shipment: </span><strong>{form.shipmentType}</strong></div>
-          <div><span className="form-label">Created: </span><strong>{createdAt ? new Date(createdAt).toLocaleString() : '—'}</strong></div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h2 className="card__header" style={{ marginBottom: editingSummary ? 16 : undefined }}>Shipment Summary</h2>
+          <button
+            className="btn btn--outline btn--sm"
+            onClick={() => setEditingSummary(!editingSummary)}
+            style={{ marginBottom: editingSummary ? 16 : 8 }}
+          >
+            {editingSummary ? 'Done Editing' : 'Edit'}
+          </button>
         </div>
+
+        {editingSummary ? (
+          <div className="form-grid">
+            <div className="form-group">
+              <label className="form-label">AWB Number</label>
+              <input type="text" className="form-input" value={form.awbNumber}
+                onChange={handleAwbChange} maxLength={12} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Remains Type</label>
+              <select className="form-select" value={form.remainsType} onChange={updateField('remainsType')}>
+                <option>Human Remains</option>
+                <option>Human Remains - ASH</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Origin</label>
+              <input type="text" className="form-input" value={form.origin} maxLength={3}
+                onChange={(e) => setForm(p => ({ ...p, origin: e.target.value.toUpperCase() }))} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Destination</label>
+              <input type="text" className="form-input" value={form.destination} maxLength={3}
+                onChange={(e) => setForm(p => ({ ...p, destination: e.target.value.toUpperCase() }))} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Routing</label>
+              <input type="text" className="form-input" value={form.routing}
+                onChange={(e) => setForm(p => ({ ...p, routing: e.target.value.toUpperCase() }))}
+                onBlur={handleRoutingBlur} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Flight Numbers</label>
+              <input type="text" className="form-input" value={form.flightNumbers}
+                onChange={(e) => setForm(p => ({ ...p, flightNumbers: e.target.value.toUpperCase() }))}
+                onBlur={handleFlightsBlur} />
+            </div>
+          </div>
+        ) : (
+          <div className="form-grid" style={{ gap: '8px 24px' }}>
+            <div><span className="form-label">AWB: </span><strong>{form.awbNumber}</strong></div>
+            <div><span className="form-label">Type: </span><strong>{form.remainsType}</strong></div>
+            <div><span className="form-label">Origin: </span><strong>{getAirportDisplay(form.origin)}</strong></div>
+            <div><span className="form-label">Destination: </span><strong>{getAirportDisplay(form.destination)}</strong></div>
+            <div><span className="form-label">Routing: </span><strong>{form.routing || '—'}</strong></div>
+            <div><span className="form-label">Flights: </span><strong>{form.flightNumbers || '—'}</strong></div>
+            <div><span className="form-label">Created: </span><strong>{createdAt ? new Date(createdAt).toLocaleString() : '—'}</strong></div>
+          </div>
+        )}
       </div>
 
       {/* Checklist */}

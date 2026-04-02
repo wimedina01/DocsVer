@@ -133,15 +133,14 @@ export function generateChecklistPDF(data) {
 
   y += 4.5;
   vx = lbl('Routing:', c1, y); val(routing || '', vx, y);
-  vx = lbl('Shipment:', c2, y); val(shipmentType || '', vx, y);
+  vx = lbl('Flights:', c2, y); val(flightNumbers || '', vx, y);
 
   y += 4.5;
-  vx = lbl('Flights:', c1, y); val(flightNumbers || '', vx, y);
   if (submittedAt) {
     const ds = new Date(submittedAt).toLocaleString('en-US', {
       month: '2-digit', day: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
     });
-    vx = lbl('Date:', c2, y); val(ds, vx, y);
+    vx = lbl('Date:', c1, y); val(ds, vx, y);
   }
 
   y += 3.5;
@@ -199,8 +198,11 @@ export function generateChecklistPDF(data) {
         if (hook.cell.raw === 'Missing') {
           hook.cell.styles.textColor = ALERT_RED;
           hook.cell.styles.fontStyle = 'bold';
+          hook.cell.styles.fillColor = [255, 230, 220]; // Atmos Light Red #FFE6DC
         } else if (hook.cell.raw === 'Verified') {
           hook.cell.styles.textColor = ALERT_GREEN;
+          hook.cell.styles.fontStyle = 'bold';
+          hook.cell.styles.fillColor = [220, 250, 230]; // Atmos Light Green #DCFAE6
         }
       }
     },
