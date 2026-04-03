@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import { useStation } from '../lib/StationContext';
 
 const STATUS_OPTIONS = ['Required', 'Required - Copies OK', 'Not Required'];
 const APPLIES_OPTIONS = [{ value: 'BOTH', label: 'Both (HR & ASH)' }, { value: 'HUMAN_REMAINS', label: 'Human Remains' }, { value: 'HUMAN_REMAINS_ASH', label: 'Human Remains - ASH' }];
 const APPLIES_LABELS = { BOTH: 'Both', HUMAN_REMAINS: 'Human Remains', HUMAN_REMAINS_ASH: 'ASH' };
+
+function formatAwb(v) { const d = v.replace(/[^0-9]/g, ''); return d.length <= 3 ? d : d.slice(0, 3) + '-' + d.slice(3, 11); }
 
 export default function AdminPage() {
   const [requirements, setRequirements] = useState([]);
@@ -59,10 +60,10 @@ export default function AdminPage() {
   };
   const getDefault = rid => defaults.find(d => d.requirement_id === rid)?.status || 'Required';
 
-  // AWB search across all stations
   const handleSearchAwb = async () => {
     if (!searchAwb.trim()) { setTxResults([]); return; }
-    const { data } = await supabase.from('checklist_transactions').select('*').ilike('awb_number', `%${searchAwb.trim()}%`).order('submitted_at', { ascending: false }).limit(50);
+    const clean = searchAwb.replace(/[^0-9-]/g, '');
+    const { data } = await supabase.from('checklist_transactions').select('*').ilike('awb_number', `%${clean}%`).order('submitted_at', { ascending: false }).limit(50);
     setTxResults(data || []);
   };
 
@@ -71,12 +72,14 @@ export default function AdminPage() {
     <>
       {message.text && <div className={`alert alert--${message.type}`}>{message.text}<button onClick={() => setMessage({ type: '', text: '' })} style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700 }}>×</button></div>}
 
-      {/* AWB Search */}
       <div className="card">
         <h2 className="card__header">Search Transactions (All Stations)</h2>
         <div style={{ display: 'flex', gap: 10 }}>
-          <input type="text" className="form-input" placeholder="Search by AWB..." value={searchAwb} onChange={e => setSearchAwb(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSearchAwb()} style={{ flex: 1 }} />
+          <input type="text" className="form-input" placeholder="AWB: XXX-XXXXXXXX"
+            value={searchAwb} onChange={e => setSearchAwb(formatAwb(e.target.value))} maxLength={12}
+            onKeyDown={e => e.key === 'Enter' && handleSearchAwb()} style={{ flex: 1 }} />
           <button className="btn btn--primary btn--sm" onClick={handleSearchAwb}>Search</button>
+          {txResults.length > 0 && <button className="btn btn--outline btn--sm" onClick={() => { setSearchAwb(''); setTxResults([]); }}>Clear</button>}
         </div>
         {txResults.length > 0 && (
           <div style={{ overflowX: 'auto', marginTop: 12 }}>
@@ -89,7 +92,6 @@ export default function AdminPage() {
         )}
       </div>
 
-      {/* Add Requirement */}
       <div className="card">
         <h2 className="card__header">Add New Document Requirement</h2>
         <div className="form-grid">
@@ -97,10 +99,9 @@ export default function AdminPage() {
           <div className="form-group"><label className="form-label">Applies To</label><select className="form-select" value={newReq.applies_to} onChange={e => setNewReq(p => ({ ...p, applies_to: e.target.value }))}>{APPLIES_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select></div>
           <div className="form-group form-group--full"><label className="form-label">Description</label><input type="text" className="form-input" placeholder="Brief description" value={newReq.description} onChange={e => setNewReq(p => ({ ...p, description: e.target.value }))} /></div>
         </div>
-        <div className="button-row"><button className="btn btn--primary" onClick={handleAdd} disabled={saving}>{saving ? 'Saving...' : 'Add Requirement'}</button></div>
+        <div className="button-row"><button className="btn btn--primary" onClick={handleAdd} disabled={saving}>{saving ? 'Saving...' : 'Add'}</button></div>
       </div>
 
-      {/* Requirements Table */}
       <div className="card">
         <h2 className="card__header">Document Requirements & Default Statuses</h2>
         <div style={{ overflowX: 'auto' }}>
