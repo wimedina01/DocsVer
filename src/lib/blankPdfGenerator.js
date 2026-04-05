@@ -2,7 +2,7 @@ import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 
 export function generateBlankChecklistPDF(data) {
-  const { destination, destinationDisplay, remainsType, checklistItems } = data;
+  const { destination, destinationDisplay, remainsType, checklistItems, lastMatrixUpdate } = data;
   const doc = new jsPDF('portrait', 'mm', 'letter');
   const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
   const M = 16, L = M, R = W - M, CW = R - L;
@@ -24,10 +24,9 @@ export function generateBlankChecklistPDF(data) {
   doc.text(remainsType || '', tx + doc.getTextWidth('Type:  '), y);
   y += 3; doc.setDrawColor(20, 20, 210); doc.setLineWidth(0.6); doc.line(L, y, R, y); y += 5;
 
-  // Table — custom notes as linebreak text, not separate cells
   const rows = checklistItems.map((item, i) => [
     (i + 1).toString(),
-    item.custom_note ? `${item.document_name}\n\u26A0 ${item.custom_note}` : item.document_name,
+    item.custom_note ? `${item.document_name}\n& ${item.custom_note}` : item.document_name,
     item.status || 'Required', '',
   ]);
 
@@ -46,15 +45,12 @@ export function generateBlankChecklistPDF(data) {
     },
   });
 
-  y = doc.lastAutoTable.finalY + 8;
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(...MG); doc.text('NOTES', L, y);
-  doc.setDrawColor(...MT); doc.setLineWidth(0.15);
-  for (let i = 0; i < 4; i++) { y += 7; doc.line(L, y, R, y); }
-
+  // Footer — no notes section, show last update date
   const fy = H - M;
   doc.setDrawColor(20, 20, 210); doc.setLineWidth(0.4); doc.line(L, fy - 4, R, fy - 4);
   doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(...MG);
   doc.text('United Cargo \u2014 Document Requirements Reference', L, fy);
-  doc.text('Generated: ' + new Date().toLocaleDateString(), R, fy, { align: 'right' });
+  const updateText = lastMatrixUpdate ? `Last updated: ${new Date(lastMatrixUpdate).toLocaleDateString()}` : `Generated: ${new Date().toLocaleDateString()}`;
+  doc.text(updateText, R, fy, { align: 'right' });
   return doc;
 }

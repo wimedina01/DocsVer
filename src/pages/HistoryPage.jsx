@@ -15,28 +15,39 @@ export default function HistoryPage() {
   const [filterStatus, setFilterStatus] = useState('');
   const [deleted90, setDeleted90] = useState(0);
 
-  useEffect(() => { cleanup90Days(); loadTransactions(); }, []);
+  useEffect(() => { cleanup90Days(); loadTransactions(); }, [homeStation]);
 
   const cleanup90Days = async () => {
     const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
     try {
       const { data } = await supabase.from('checklist_transactions').delete().lt('submitted_at', cutoff).select('id');
       if (data && data.length > 0) setDeleted90(data.length);
-    } catch (e) { console.error('Cleanup error:', e); }
+    } catch (e) { console.error(e); }
   };
 
   const loadTransactions = async () => {
     setLoading(true);
     try {
-      let query = supabase.from('checklist_transactions').select('*').order('submitted_at', { ascending: false }).limit(200);
-      if (homeStation) query = query.or(`origin.eq.${homeStation.toUpperCase()},destination.eq.${homeStation.toUpperCase()}`);
-      const { data } = await query;
-      setTransactions(data || []);
+      const { data } = await supabase.from('checklist_transactions').select('*').order('submitted_at', { ascending: false }).limit(300);
+      // Filter by home station — routing-aware
+      let filtered = data || [];
+      if (homeStation) {
+        const hs = homeStation.toUpperCase();
+        filtered = filtered.filter(tx => {
+          if (tx.origin === hs || tx.destination === hs) return true;
+          if (tx.routing) {
+            const stops = tx.routing.replace(/\s*-\s*/g, ' ').trim().split(/\s+/).map(s => s.toUpperCase());
+            if (stops.includes(hs)) return true;
+          }
+          return false;
+        });
+      }
+      setTransactions(filtered);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   };
 
-  const filtered = transactions.filter(t => {
+  const searchFiltered = transactions.filter(t => {
     if (searchAwb && !t.awb_number.toLowerCase().includes(searchAwb.toLowerCase())) return false;
     if (searchAgent && !(t.employee_id || '').toLowerCase().includes(searchAgent.toLowerCase())) return false;
     if (filterDest && t.destination !== filterDest.toUpperCase()) return false;
@@ -46,7 +57,14 @@ export default function HistoryPage() {
   });
 
   const handleReprint = (tx) => {
-    const pdf = generateChecklistPDF({ awbNumber: tx.awb_number, origin: tx.origin, originDisplay: getAirportDisplay(tx.origin), destination: tx.destination, destinationDisplay: getAirportDisplay(tx.destination), routing: tx.routing, flightNumbers: tx.flight_numbers, shipmentType: tx.shipment_type, remainsType: tx.remains_type, checklistItems: tx.checklist_items, notes: '', employeeId: tx.employee_id || '', submittedAt: tx.submitted_at });
+    const pdf = generateChecklistPDF({
+      awbNumber: tx.awb_number, origin: tx.origin, originDisplay: getAirportDisplay(tx.origin),
+      destination: tx.destination, destinationDisplay: getAirportDisplay(tx.destination),
+      routing: tx.routing, flightNumbers: tx.flight_numbers, shipmentType: tx.shipment_type,
+      remainsType: tx.remains_type, checklistItems: tx.checklist_items, notes: '',
+      employeeId: tx.employee_id || '', submittedAt: tx.submitted_at,
+      supervisorId: tx.supervisor_id || '', supervisorStation: tx.origin || '',
+    });
     window.open(URL.createObjectURL(pdf.output('blob')), '_blank');
   };
 
@@ -60,55 +78,85 @@ export default function HistoryPage() {
 
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
         <input type="text" className="form-input" placeholder="Search AWB..." value={searchAwb} onChange={e => setSearchAwb(e.target.value)} style={{ flex: '1 1 140px' }} />
-        <input type="text" className="form-input" placeholder="Search Agent ID..." value={searchAgent} onChange={e => setSearchAgent(e.target.value)} style={{ flex: '1 1 130px' }} />
+        <input type="text" className="form-input" placeholder="Search Agent..." value={searchAgent} onChange={e => setSearchAgent(e.target.value)} style={{ flex: '1 1 130px' }} />
         <select className="form-select" value={filterDest} onChange={e => setFilterDest(e.target.value)} style={{ flex: '0 0 120px' }}>
-          <option value="">All Dest</option>{dests.map(d => <option key={d} value={d}>{d}</option>)}
-        </select>
+          <option value="">All Dest</option>{dests.map(d => <option key={d} value={d}>{d}</option>)}</select>
         <select className="form-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={{ flex: '0 0 120px' }}>
-          <option value="">All Status</option><option value="verified">Verified</option><option value="missing">Has Missing</option>
-        </select>
+          <option value="">All Status</option><option value="verified">Verified</option><option value="missing">Has Missing</option></select>
         <button className="btn btn--outline btn--sm" onClick={() => { setSearchAwb(''); setSearchAgent(''); setFilterDest(''); setFilterStatus(''); }}>Clear</button>
       </div>
 
-      {filtered.length === 0 ? <div className="alert alert--info">No transactions found.</div> : (
+      {searchFiltered.length === 0 ? <div className="alert alert--info">No transactions found.</div> : (
         <div style={{ overflowX: 'auto' }}>
           <table className="admin-table">
-            <thead><tr><th>Date/Time</th><th>AWB</th><th>Origin</th><th>Dest</th><th>Type</th><th>Status</th><th>Agent</th><th></th></tr></thead>
-            <tbody>
-              {filtered.map(tx => (
-                <React.Fragment key={tx.id}>
-                  <tr style={{ cursor: 'pointer' }} onClick={() => setExpanded(expanded === tx.id ? null : tx.id)}>
-                    <td style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{new Date(tx.submitted_at).toLocaleString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
-                    <td><strong>{tx.awb_number}</strong></td><td>{tx.origin}</td><td>{tx.destination}</td>
-                    <td style={{ fontSize: 12 }}>{tx.remains_type}</td>
-                    <td><span className={`status-badge ${tx.all_verified ? 'status-badge--not-required' : 'status-badge--required'}`}>{tx.all_verified ? 'Verified' : 'Missing'}</span></td>
-                    <td>{tx.employee_id || '—'}</td>
-                    <td><button className="btn btn--outline btn--sm" onClick={e => { e.stopPropagation(); handleReprint(tx); }}>Reprint</button></td>
-                  </tr>
-                  {expanded === tx.id && (
-                    <tr><td colSpan={8} style={{ padding: 16, background: 'var(--medium-tonal-grey-20)' }}>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
-                        <div><span className="form-label">Routing: </span>{tx.routing || '—'}</div>
-                        <div><span className="form-label">Flights: </span>{tx.flight_numbers || '—'}</div>
-                        <div><span className="form-label">Submitted: </span>{new Date(tx.submitted_at).toLocaleString()}</div>
-                        <div><span className="form-label">Agent: </span><strong>{tx.employee_id || '—'}</strong></div>
+            <thead><tr><th>Date</th><th>AWB</th><th>Route</th><th>Type</th><th>Agent</th><th>Status</th><th>Supervisor</th><th></th></tr></thead>
+            <tbody>{searchFiltered.map(tx => (
+              <React.Fragment key={tx.id}>
+                <tr style={{ cursor: 'pointer' }} onClick={() => setExpanded(expanded === tx.id ? null : tx.id)}>
+                  <td style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{new Date(tx.submitted_at).toLocaleString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
+                  <td><strong>{tx.awb_number}</strong></td>
+                  <td style={{ fontSize: 11 }}>{tx.origin} → {tx.destination}{tx.routing ? ` (${tx.routing})` : ''}</td>
+                  <td style={{ fontSize: 11 }}>{tx.remains_type}</td>
+                  <td>{tx.employee_id || '—'}</td>
+                  <td><span className={`status-badge ${tx.all_verified ? 'status-badge--not-required' : 'status-badge--required'}`}>{tx.all_verified ? 'Verified' : 'Missing'}</span></td>
+                  <td style={{ fontSize: 11 }}>
+                    {tx.supervisor_id ? (
+                      <span style={{ color: 'var(--alert-green)', fontWeight: 600 }}>✓ {tx.supervisor_id}</span>
+                    ) : tx.override_by ? (
+                      <span style={{ color: 'var(--alert-yellow)', fontWeight: 600 }}>Override: {tx.override_by}</span>
+                    ) : <span style={{ color: 'var(--text-disabled)' }}>Pending</span>}
+                  </td>
+                  <td><button className="btn btn--outline btn--sm" onClick={e => { e.stopPropagation(); handleReprint(tx); }}>Reprint</button></td>
+                </tr>
+                {expanded === tx.id && (
+                  <tr><td colSpan={8} style={{ padding: 16, background: 'var(--medium-tonal-grey-20)' }}>
+                    {/* Full transaction timeline */}
+                    <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, color: 'var(--united-blue)' }}>Transaction Timeline</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
+                      <div style={{ display: 'flex', gap: 12, fontSize: 13 }}>
+                        <span style={{ width: 140, color: 'var(--text-secondary)', fontWeight: 600 }}>Created:</span>
+                        <span>{new Date(tx.submitted_at).toLocaleString()}</span>
                       </div>
-                      <table className="checklist-table" style={{ fontSize: 13 }}>
-                        <thead><tr><th>Document</th><th>Status</th><th>Verification</th></tr></thead>
-                        <tbody>{(tx.checklist_items || []).map((item, i) => (
-                          <tr key={i}><td>{item.document_name}{item.custom_note && <span style={{ color: 'var(--united-blue)', marginLeft: 6, fontSize: 11 }}>⚠ {item.custom_note}</span>}</td>
-                            <td>{item.status}</td><td><span style={{ color: item.verification === 'Missing' ? 'var(--alert-red)' : 'var(--alert-green)', fontWeight: 600 }}>{item.verification}</span></td></tr>
-                        ))}</tbody>
-                      </table>
-                    </td></tr>
-                  )}
-                </React.Fragment>
-              ))}
-            </tbody>
+                      <div style={{ display: 'flex', gap: 12, fontSize: 13 }}>
+                        <span style={{ width: 140, color: 'var(--text-secondary)', fontWeight: 600 }}>Agent Verified:</span>
+                        <span>{tx.employee_id || '—'} — {new Date(tx.submitted_at).toLocaleString()}</span>
+                      </div>
+                      {tx.supervisor_id && (
+                        <div style={{ display: 'flex', gap: 12, fontSize: 13 }}>
+                          <span style={{ width: 140, color: 'var(--text-secondary)', fontWeight: 600 }}>Supervisor Verified:</span>
+                          <span style={{ color: 'var(--alert-green)' }}>{tx.supervisor_id} — {tx.supervisor_reviewed_at ? new Date(tx.supervisor_reviewed_at).toLocaleString() : '—'}</span>
+                        </div>
+                      )}
+                      {tx.override_by && (
+                        <div style={{ display: 'flex', gap: 12, fontSize: 13 }}>
+                          <span style={{ width: 140, color: 'var(--text-secondary)', fontWeight: 600 }}>Override:</span>
+                          <span style={{ color: 'var(--alert-yellow)' }}>{tx.override_by} — {tx.override_at ? new Date(tx.override_at).toLocaleString() : '—'}</span>
+                        </div>
+                      )}
+                      {tx.override_notes && (
+                        <div style={{ display: 'flex', gap: 12, fontSize: 13 }}>
+                          <span style={{ width: 140, color: 'var(--text-secondary)', fontWeight: 600 }}>Override Notes:</span>
+                          <span>{tx.override_notes}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <table className="checklist-table" style={{ fontSize: 13 }}>
+                      <thead><tr><th>Document</th><th>Status</th><th>Verification</th></tr></thead>
+                      <tbody>{(tx.checklist_items || []).map((item, i) => (
+                        <tr key={i}><td>{item.document_name}{item.custom_note && <span style={{ color: 'var(--united-blue)', marginLeft: 6, fontSize: 11 }}>⚠ {item.custom_note}</span>}</td>
+                          <td>{item.status}</td>
+                          <td><span style={{ color: item.verification === 'Missing' ? 'var(--alert-red)' : 'var(--alert-green)', fontWeight: 600 }}>{item.verification}</span></td></tr>
+                      ))}</tbody>
+                    </table>
+                  </td></tr>
+                )}
+              </React.Fragment>
+            ))}</tbody>
           </table>
         </div>
       )}
-      <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-disabled)' }}>{filtered.length} of {transactions.length} transactions shown</div>
+      <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-disabled)' }}>{searchFiltered.length} of {transactions.length} shown</div>
     </div>
   );
 }

@@ -9,6 +9,7 @@ export default function QuickPrintPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [items, setItems] = useState(null);
+  const [lastUpdate, setLastUpdate] = useState(null);
 
   const handleLookup = async () => {
     if (!destination.trim()) { setError('Enter a destination code.'); return; }
@@ -22,7 +23,14 @@ export default function QuickPrintPage() {
         if (remainsType === 'Human Remains - ASH' && r.applies_to === 'HUMAN_REMAINS_ASH') return true;
         return false;
       });
-      const { data: airportReqs } = await supabase.from('airport_requirements').select('requirement_id, status, custom_note').eq('airport_code', dest);
+      const { data: airportReqs } = await supabase.from('airport_requirements').select('requirement_id, status, custom_note, updated_at').eq('airport_code', dest);
+
+      // Get latest update date
+      if (airportReqs && airportReqs.length > 0) {
+        const dates = airportReqs.filter(a => a.updated_at).map(a => new Date(a.updated_at).getTime());
+        if (dates.length > 0) setLastUpdate(new Date(Math.max(...dates)).toISOString());
+      }
+
       let result;
       if (airportReqs && airportReqs.length > 0) {
         const m = new Map(airportReqs.map(a => [a.requirement_id, { status: a.status, custom_note: a.custom_note }]));
@@ -41,7 +49,7 @@ export default function QuickPrintPage() {
   };
 
   const handlePrint = () => {
-    const pdf = generateBlankChecklistPDF({ destination: destination.toUpperCase(), destinationDisplay: getAirportDisplay(destination), remainsType, checklistItems: items });
+    const pdf = generateBlankChecklistPDF({ destination: destination.toUpperCase(), destinationDisplay: getAirportDisplay(destination), remainsType, checklistItems: items, lastMatrixUpdate: lastUpdate });
     window.open(URL.createObjectURL(pdf.output('blob')), '_blank');
   };
 
@@ -77,6 +85,7 @@ export default function QuickPrintPage() {
               </tr>
             ))}</tbody>
           </table>
+          {lastUpdate && <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-disabled)' }}>Last matrix update: {new Date(lastUpdate).toLocaleDateString()}</div>}
           <div className="button-row">
             <button className="btn btn--outline" onClick={() => setItems(null)}>Clear</button>
             <button className="btn btn--primary" onClick={handlePrint}>Print Checklist PDF</button>

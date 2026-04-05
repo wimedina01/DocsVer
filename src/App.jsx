@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom';
 import { StationProvider, useStation } from './lib/StationContext';
 import { getAirportShort } from './lib/airportCodes';
@@ -10,12 +10,62 @@ import HistoryPage from './pages/HistoryPage';
 import SupervisorPage from './pages/SupervisorPage';
 import PasswordGate from './components/PasswordGate';
 
+function StationInput() {
+  const { homeStation, setHomeStation, configuredStations } = useStation();
+  const [input, setInput] = useState(homeStation);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => { setInput(homeStation); }, [homeStation]);
+
+  const filtered = configuredStations.filter(c =>
+    !input || c.includes(input.toUpperCase()) || getAirportShort(c).toUpperCase().includes(input.toUpperCase())
+  ).slice(0, 8);
+
+  const hasChange = input.toUpperCase().trim() !== homeStation;
+
+  const handleSave = () => { setHomeStation(input); setShowSuggestions(false); };
+  const handleReset = () => { setInput(homeStation); setShowSuggestions(false); };
+  const handleSelect = (code) => { setInput(code); setHomeStation(code); setShowSuggestions(false); };
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, position: 'relative' }}>
+      <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>HOME STATION:</label>
+      <div style={{ position: 'relative' }}>
+        <input type="text" value={input} maxLength={3}
+          onChange={e => { setInput(e.target.value.toUpperCase()); setShowSuggestions(true); }}
+          onFocus={() => setShowSuggestions(true)}
+          placeholder="Type code..."
+          style={{ width: 80, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border-default)', fontSize: 14, fontWeight: 700, textAlign: 'center', background: 'var(--surface-card)', color: 'var(--text-primary)' }} />
+        {showSuggestions && filtered.length > 0 && (
+          <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 50, background: 'var(--surface-card)', border: '1px solid var(--medium-tonal-grey)', borderRadius: 8, boxShadow: 'var(--shadow-3)', maxHeight: 200, overflowY: 'auto', minWidth: 240, marginTop: 2 }}>
+            {filtered.map(c => (
+              <div key={c} onClick={() => handleSelect(c)} style={{ padding: '6px 10px', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid var(--medium-tonal-grey-50)' }}
+                onMouseEnter={e => e.target.style.background = 'var(--medium-tonal-grey-50)'}
+                onMouseLeave={e => e.target.style.background = 'transparent'}>
+                <strong>{c}</strong> — {getAirportShort(c)}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      {homeStation && !hasChange && <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{getAirportShort(homeStation)}</span>}
+      {hasChange && (
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button onClick={handleSave} className="btn btn--primary btn--sm" style={{ padding: '3px 10px', fontSize: 11 }}>Save</button>
+          <button onClick={handleReset} className="btn btn--outline btn--sm" style={{ padding: '3px 10px', fontSize: 11 }}>Reset</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AppInner() {
-  const { homeStation, setHomeStation, pendingStation, setPendingStation, resetStation, hasUnsavedChange, darkMode, setDarkMode, configuredStations } = useStation();
+  const { darkMode, setDarkMode } = useStation();
 
   return (
     <BrowserRouter>
-      <div className="app-shell">
+      <div className="app-shell" onClick={() => {}}>
         <header className="app-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             <img src="/united-cargo-logo.png" alt="United Cargo" style={{ height: 36 }} />
@@ -35,28 +85,7 @@ function AppInner() {
         </header>
 
         <div className="station-bar">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1 }}>
-            <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>HOME STATION:</label>
-            <select
-              value={hasUnsavedChange ? pendingStation : homeStation}
-              onChange={e => setPendingStation(e.target.value)}
-              style={{ width: 200, padding: '5px 10px', borderRadius: 8, border: '1px solid var(--border-default)', fontSize: 13, fontWeight: 600, background: 'var(--surface-card)', color: 'var(--text-primary)' }}
-            >
-              <option value="">— Select Station —</option>
-              {configuredStations.map(c => (
-                <option key={c} value={c}>{c} — {getAirportShort(c)}</option>
-              ))}
-            </select>
-            {hasUnsavedChange && (
-              <div style={{ display: 'flex', gap: 6 }}>
-                <button onClick={() => setHomeStation(pendingStation)} className="btn btn--primary btn--sm" style={{ padding: '4px 12px', fontSize: 11 }}>Save</button>
-                <button onClick={resetStation} className="btn btn--outline btn--sm" style={{ padding: '4px 12px', fontSize: 11 }}>Reset</button>
-              </div>
-            )}
-            {homeStation && !hasUnsavedChange && (
-              <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{getAirportShort(homeStation)}</span>
-            )}
-          </div>
+          <StationInput />
           <button onClick={() => setDarkMode(!darkMode)}
             style={{ background: 'none', border: '1px solid var(--border-default)', borderRadius: 20, padding: '4px 12px', cursor: 'pointer', fontSize: 12, color: 'var(--text-secondary)' }}>
             {darkMode ? '☀ Light' : '🌙 Dark'}
@@ -78,6 +107,4 @@ function AppInner() {
   );
 }
 
-export default function App() {
-  return <StationProvider><AppInner /></StationProvider>;
-}
+export default function App() { return <StationProvider><AppInner /></StationProvider>; }

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
-import { getAirportShort, getAirportDisplay } from '../lib/airportCodes';
+import { getAirportShort } from '../lib/airportCodes';
 import * as XLSX from 'xlsx';
 
 const STATUS_OPTIONS = ['Required', 'Required - Copies OK', 'Not Required'];
@@ -48,6 +48,7 @@ export default function StationMatrixPage() {
   const getNote = (rid, c) => getReq(rid, c)?.custom_note || '';
   const getUpdatedBy = (rid, c) => getReq(rid, c)?.updated_by || '';
   const getUpdatedAt = (rid, c) => getReq(rid, c)?.updated_at || '';
+  const getCodPendingOk = (rid, c) => getReq(rid, c)?.cause_of_death_pending_ok || false;
 
   const handleUpdateStatus = async (rid, c, s) => {
     if (!ensureUser()) return; const now = new Date().toISOString();
@@ -65,11 +66,24 @@ export default function StationMatrixPage() {
     setAirportReqs(p => p.map(a => a.requirement_id === rid && a.airport_code === c ? { ...a, custom_note: n, updated_at: now, updated_by: userId } : a));
   };
 
+  const handleToggleCodPending = async (code) => {
+    if (!ensureUser()) return;
+    // Toggle cause_of_death_pending_ok for ALL requirements at this airport
+    const current = airportReqs.filter(a => a.airport_code === code);
+    const currentVal = current.some(a => a.cause_of_death_pending_ok);
+    const newVal = !currentVal;
+    for (const ar of current) {
+      await supabase.from('airport_requirements').update({ cause_of_death_pending_ok: newVal }).eq('id', ar.id);
+    }
+    setAirportReqs(p => p.map(a => a.airport_code === code ? { ...a, cause_of_death_pending_ok: newVal } : a));
+    flash('success', `${code}: Cause of Death Pending ${newVal ? 'acceptable' : 'not acceptable'}`);
+  };
+
   const handleAddAirport = async () => {
     const c = newAirport.toUpperCase().trim();
     if (c.length !== 3) { flash('warning', '3 chars required.'); return; }
     if (airports.includes(c)) { flash('warning', `${c} exists.`); return; }
-    const inserts = requirements.map(r => ({ requirement_id: r.id, airport_code: c, status: 'Required', custom_note: '', updated_by: userId || '', updated_at: new Date().toISOString() }));
+    const inserts = requirements.map(r => ({ requirement_id: r.id, airport_code: c, status: 'Required', custom_note: '', updated_by: userId || '', updated_at: new Date().toISOString(), cause_of_death_pending_ok: false }));
     if (inserts.length) await supabase.from('airport_requirements').insert(inserts);
     setNewAirport(''); flash('success', `${c} added.`); await loadData();
   };
@@ -90,25 +104,42 @@ export default function StationMatrixPage() {
     flash('success', 'Added.'); await loadData();
   };
 
-  // ── Matrix-format Excel Export (stations as rows, docs as columns) ──
+  // ── Download Excel Template ──
+  const handleDownloadTemplate = () => {
+    const header = ['Station (3-letter code)', 'COD Pending OK (Y/N)', ...requirements.map(r => r.document_name)];
+    const instructions = ['INSTRUCTIONS:', '', ...requirements.map(() => '')];
+    const example = ['BOG', 'N', ...requirements.map(() => 'Required')];
+    const ws = XLSX.utils.aoa_to_sheet([
+      ['Station Management Import Template — United Cargo HR Document Checklist'],
+      ['Fill in station codes and set each document status. Valid statuses: Required, Required - Copies OK, Not Required'],
+      ['To add a custom note, use format: Required | Note text here'],
+      ['COD Pending OK: Y = Cause of Death pending is acceptable, N = not acceptable'],
+      [],
+      header, example,
+    ]);
+    ws['!cols'] = [{ wch: 22 }, { wch: 18 }, ...requirements.map(() => ({ wch: 24 }))];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Template');
+    XLSX.writeFile(wb, 'Station_Matrix_Template.xlsx');
+  };
+
+  // ── Export ──
   const handleExport = () => {
-    const header = ['Station', 'City', ...requirements.map(r => r.document_name)];
+    const header = ['Station', 'City', 'COD Pending OK', ...requirements.map(r => r.document_name)];
     const rows = airports.map(c => {
-      const row = [c, getAirportShort(c).split('(')[0].trim()];
-      requirements.forEach(r => {
-        const st = getStatus(r.id, c), nt = getNote(r.id, c);
-        row.push(nt ? `${st} | ${nt}` : st);
-      });
+      const codOk = airportReqs.filter(a => a.airport_code === c).some(a => a.cause_of_death_pending_ok) ? 'Y' : 'N';
+      const row = [c, getAirportShort(c).split('(')[0].trim(), codOk];
+      requirements.forEach(r => { const st = getStatus(r.id, c), nt = getNote(r.id, c); row.push(nt ? `${st} | ${nt}` : st); });
       return row;
     });
     const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
-    ws['!cols'] = [{ wch: 6 }, { wch: 25 }, ...requirements.map(() => ({ wch: 24 }))];
+    ws['!cols'] = [{ wch: 6 }, { wch: 25 }, { wch: 14 }, ...requirements.map(() => ({ wch: 24 }))];
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Station Matrix');
+    XLSX.utils.book_append_sheet(wb, ws, 'Matrix');
     XLSX.writeFile(wb, 'Station_Matrix.xlsx');
   };
 
-  // ── Import with progress ──
+  // ── Import ──
   const handleImport = async e => {
     const file = e.target.files?.[0]; if (!file) return;
     if (!ensureUser()) return;
@@ -117,21 +148,38 @@ export default function StationMatrixPage() {
       const data = await file.arrayBuffer();
       const wb = XLSX.read(data); const ws = wb.Sheets[wb.SheetNames[0]];
       const aoa = XLSX.utils.sheet_to_json(ws, { header: 1 });
-      if (aoa.length < 2) { flash('warning', 'Empty file.'); setImportProgress(null); return; }
-      // Header row: Station, City, Doc1, Doc2, ...
-      const docNames = aoa[0].slice(2).map(h => (h || '').toString().trim());
+      // Find header row (first row with "Station" in first cell)
+      let headerIdx = 0;
+      for (let i = 0; i < Math.min(aoa.length, 10); i++) {
+        const first = (aoa[i]?.[0] || '').toString().toLowerCase();
+        if (first.includes('station')) { headerIdx = i; break; }
+      }
+      const headerRow = aoa[headerIdx];
+      // Find COD column and doc columns
+      const codColIdx = headerRow.findIndex(h => (h || '').toString().toLowerCase().includes('cod'));
+      const docStartIdx = codColIdx >= 0 ? codColIdx + 1 : 2;
+      const docNames = headerRow.slice(docStartIdx).map(h => (h || '').toString().trim());
       const now = new Date().toISOString();
-      const totalRows = aoa.length - 1;
+      const totalRows = aoa.length - headerIdx - 1;
       let updated = 0;
-      for (let i = 1; i < aoa.length; i++) {
+      for (let i = headerIdx + 1; i < aoa.length; i++) {
         const row = aoa[i];
         const code = (row[0] || '').toString().trim().toUpperCase();
         if (!code || code.length !== 3) continue;
+        // COD pending
+        if (codColIdx >= 0) {
+          const codVal = (row[codColIdx] || '').toString().trim().toUpperCase();
+          const codOk = codVal === 'Y' || codVal === 'YES' || codVal === 'TRUE';
+          const existing = airportReqs.filter(a => a.airport_code === code);
+          for (const ar of existing) {
+            await supabase.from('airport_requirements').update({ cause_of_death_pending_ok: codOk }).eq('id', ar.id);
+          }
+        }
         for (let j = 0; j < docNames.length; j++) {
           const docName = docNames[j]; if (!docName) continue;
           const req = requirements.find(r => r.document_name.toLowerCase() === docName.toLowerCase());
           if (!req) continue;
-          const cellVal = (row[j + 2] || '').toString().trim(); if (!cellVal) continue;
+          const cellVal = (row[j + docStartIdx] || '').toString().trim(); if (!cellVal) continue;
           const parts = cellVal.split('|').map(s => s.trim());
           const status = STATUS_OPTIONS.includes(parts[0]) ? parts[0] : null;
           if (!status) continue;
@@ -141,7 +189,7 @@ export default function StationMatrixPage() {
           else await supabase.from('airport_requirements').insert({ requirement_id: req.id, airport_code: code, status, custom_note: note, updated_by: userId, updated_at: now });
           updated++;
         }
-        setImportProgress(Math.round((i / totalRows) * 100));
+        setImportProgress(Math.round(((i - headerIdx) / totalRows) * 100));
       }
       flash('success', `${updated} cells updated.`); await loadData();
     } catch (err) { flash('warning', 'Import error: ' + err.message); }
@@ -149,7 +197,6 @@ export default function StationMatrixPage() {
   };
 
   const timeAgo = d => { if (!d) return ''; const m = Math.floor((Date.now() - new Date(d).getTime()) / 60000); if (m < 1) return 'now'; if (m < 60) return `${m}m`; const h = Math.floor(m / 60); if (h < 24) return `${h}h`; return `${Math.floor(h / 24)}d`; };
-
   const filteredAirports = airports.filter(c => !searchStation || c.includes(searchStation.toUpperCase()) || getAirportShort(c).toUpperCase().includes(searchStation.toUpperCase()));
   const filteredReqs = requirements.filter(r => !searchDoc || r.document_name.toLowerCase().includes(searchDoc.toLowerCase()));
 
@@ -179,8 +226,8 @@ export default function StationMatrixPage() {
       <div className="card" style={expanded ? { position: 'fixed', inset: 0, zIndex: 50, borderRadius: 0, margin: 0, maxWidth: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column' } : {}}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
           <h2 className="card__header" style={{ marginBottom: 0, paddingBottom: 0, borderBottom: 'none' }}>Station Management</h2>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, color: 'var(--text-secondary)' }}>
-            {userId && <span>ID: <strong style={{ color: 'var(--united-blue)' }}>{userId}</strong> <button onClick={() => setShowUserPrompt(true)} style={{ background: 'none', border: 'none', color: 'var(--united-blue)', cursor: 'pointer', textDecoration: 'underline', fontSize: 12 }}>change</button></span>}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
+            {userId && <span style={{ color: 'var(--text-secondary)' }}>ID: <strong style={{ color: 'var(--united-blue)' }}>{userId}</strong> <button onClick={() => setShowUserPrompt(true)} style={{ background: 'none', border: 'none', color: 'var(--united-blue)', cursor: 'pointer', textDecoration: 'underline', fontSize: 12 }}>change</button></span>}
             <button className="btn btn--outline btn--sm" onClick={() => setExpanded(!expanded)}>{expanded ? '✕ Close' : '⛶ Expand'}</button>
           </div>
         </div>
@@ -193,6 +240,9 @@ export default function StationMatrixPage() {
             <button className="btn btn--primary btn--sm" onClick={handleAddAirport}>+ Station</button>
             <button className="btn btn--outline btn--sm" onClick={() => setShowCustomForm(!showCustomForm)}>{showCustomForm ? 'Cancel' : '+ Custom'}</button>
             <button className="btn btn--outline btn--sm" onClick={handleExport}>Export</button>
+            <button className="btn btn--outline btn--sm" onClick={handleDownloadTemplate} title="Download Excel template">
+              <span style={{ fontSize: 14 }}>📊</span> Template
+            </button>
             <button className="btn btn--outline btn--sm" onClick={() => fileInputRef.current?.click()}>Import</button>
             <input type="file" ref={fileInputRef} accept=".xlsx,.xls,.csv" onChange={handleImport} style={{ display: 'none' }} />
           </div>
@@ -221,13 +271,11 @@ export default function StationMatrixPage() {
         {/* MATRIX: Stations as ROWS, Documents as COLUMNS */}
         {filteredAirports.length > 0 && filteredReqs.length > 0 ? (
           <div ref={scrollRef} style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: expanded ? 'calc(100vh - 220px)' : '65vh', border: '1px solid var(--medium-tonal-grey)', borderRadius: 10, flex: expanded ? 1 : undefined }}>
-            <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: 160 + filteredReqs.length * CELL_W }}>
+            <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: 200 + filteredReqs.length * CELL_W }}>
               <thead><tr>
-                {/* Sticky station column header */}
-                <th style={{ position: 'sticky', left: 0, top: 0, zIndex: 10, background: '#051464', color: 'white', padding: '10px 12px', textAlign: 'left', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', width: 160, minWidth: 160, borderBottom: '2px solid var(--medium-tonal-grey)' }}>Station</th>
-                {/* Document columns */}
+                <th style={{ position: 'sticky', left: 0, top: 0, zIndex: 10, background: '#051464', color: 'white', padding: '8px 10px', textAlign: 'left', fontWeight: 700, fontSize: 11, width: 200, minWidth: 200, borderBottom: '2px solid var(--medium-tonal-grey)' }}>Station</th>
                 {filteredReqs.map(req => (
-                  <th key={req.id} style={{ position: 'sticky', top: 0, zIndex: 5, background: '#051464', color: 'white', padding: '6px 4px', textAlign: 'center', fontWeight: 600, fontSize: 9, width: CELL_W, minWidth: CELL_W, borderBottom: '2px solid var(--medium-tonal-grey)', borderLeft: '1px solid rgba(255,255,255,0.15)', lineHeight: '12px' }}>
+                  <th key={req.id} style={{ position: 'sticky', top: 0, zIndex: 5, background: '#051464', color: 'white', padding: '5px 3px', textAlign: 'center', fontWeight: 600, fontSize: 8, width: CELL_W, minWidth: CELL_W, borderBottom: '2px solid var(--medium-tonal-grey)', borderLeft: '1px solid rgba(255,255,255,0.15)', lineHeight: '11px' }}>
                     {req.document_name}
                   </th>
                 ))}
@@ -235,26 +283,31 @@ export default function StationMatrixPage() {
               <tbody>
                 {filteredAirports.map((code, idx) => {
                   const bg = idx % 2 === 0 ? 'var(--surface-card)' : 'var(--medium-tonal-grey-20)';
+                  const codOk = airportReqs.filter(a => a.airport_code === code).some(a => a.cause_of_death_pending_ok);
                   return (
                     <tr key={code}>
-                      {/* Sticky station cell */}
-                      <td style={{ position: 'sticky', left: 0, zIndex: 3, background: bg, padding: '6px 10px', borderBottom: '1px solid var(--medium-tonal-grey)', fontWeight: 600, fontSize: 13, boxShadow: '2px 0 4px rgba(0,0,0,0.06)', whiteSpace: 'nowrap' }}>
-                        <div>{code}</div>
-                        <div style={{ fontSize: 9, color: 'var(--text-disabled)', fontWeight: 400 }}>{getAirportShort(code).split('(')[0].trim().slice(0, 22)}</div>
-                        <button onClick={() => handleDeleteAirport(code)} title={`Remove ${code}`} style={{ position: 'absolute', top: 4, right: 4, background: 'none', border: 'none', color: 'var(--text-disabled)', cursor: 'pointer', fontSize: 11 }}>×</button>
+                      <td style={{ position: 'sticky', left: 0, zIndex: 3, background: bg, padding: '5px 8px', borderBottom: '1px solid var(--medium-tonal-grey)', fontWeight: 600, fontSize: 12, boxShadow: '2px 0 4px rgba(0,0,0,0.06)', whiteSpace: 'nowrap' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <div>
+                            <div>{code}</div>
+                            <div style={{ fontSize: 8, color: 'var(--text-disabled)', fontWeight: 400 }}>{getAirportShort(code).split('(')[0].trim().slice(0, 22)}</div>
+                          </div>
+                          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <label title="Cause of Death Pending Acceptable" style={{ fontSize: 8, color: 'var(--text-disabled)', cursor: 'pointer' }}>COD</label>
+                            <input type="checkbox" checked={codOk} onChange={() => handleToggleCodPending(code)}
+                              title="Cause of Death Pending Acceptable" style={{ cursor: 'pointer', accentColor: 'var(--united-blue)' }} />
+                            <button onClick={() => handleDeleteAirport(code)} title={`Remove ${code}`} style={{ background: 'none', border: 'none', color: 'var(--text-disabled)', cursor: 'pointer', fontSize: 11, marginLeft: 4 }}>×</button>
+                          </div>
+                        </div>
                       </td>
-                      {/* Document cells */}
                       {filteredReqs.map(req => {
                         const st = getStatus(req.id, code), nt = getNote(req.id, code);
                         const ub = getUpdatedBy(req.id, code), ua = getUpdatedAt(req.id, code);
-                        const sc = STATUS_COLORS[st];
-                        const isEd = editCell?.reqId === req.id && editCell?.code === code;
+                        const sc = STATUS_COLORS[st]; const isEd = editCell?.reqId === req.id && editCell?.code === code;
                         return (
-                          <td key={req.id} style={{ padding: '3px 4px', textAlign: 'center', verticalAlign: 'top', borderBottom: '1px solid var(--medium-tonal-grey)', borderLeft: '1px solid var(--medium-tonal-grey-50)', background: bg, position: 'relative' }}>
+                          <td key={req.id} style={{ padding: '3px 3px', textAlign: 'center', verticalAlign: 'top', borderBottom: '1px solid var(--medium-tonal-grey)', borderLeft: '1px solid var(--medium-tonal-grey-50)', background: bg, position: 'relative' }}>
                             <div style={{ position: 'relative' }}>
-                              <button onClick={() => setEditCell(isEd ? null : { reqId: req.id, code })} style={{ width: '100%', padding: '3px 2px', borderRadius: 4, border: `1px solid ${sc.border}`, background: sc.bg, color: sc.color, fontWeight: 700, fontSize: 9, cursor: 'pointer', lineHeight: '13px' }}>
-                                {STATUS_SHORT[st]}
-                              </button>
+                              <button onClick={() => setEditCell(isEd ? null : { reqId: req.id, code })} style={{ width: '100%', padding: '3px 1px', borderRadius: 4, border: `1px solid ${sc.border}`, background: sc.bg, color: sc.color, fontWeight: 700, fontSize: 9, cursor: 'pointer', lineHeight: '12px' }}>{STATUS_SHORT[st]}</button>
                               {isEd && (
                                 <div style={{ position: 'absolute', top: '100%', left: '50%', transform: 'translateX(-50%)', zIndex: 20, background: 'var(--surface-card)', border: '1px solid var(--medium-tonal-grey)', borderRadius: 8, boxShadow: 'var(--shadow-3)', padding: 6, minWidth: 150, marginTop: 2 }}>
                                   {STATUS_OPTIONS.map(o => { const os = STATUS_COLORS[o]; return <button key={o} onClick={() => handleUpdateStatus(req.id, code, o)} style={{ display: 'block', width: '100%', padding: '5px 8px', marginBottom: 2, border: st === o ? `2px solid ${os.border}` : '1px solid var(--medium-tonal-grey-50)', borderRadius: 6, background: st === o ? os.bg : 'var(--surface-card)', color: os.color, fontWeight: 600, fontSize: 11, cursor: 'pointer', textAlign: 'left' }}>{o}</button>; })}
@@ -277,7 +330,7 @@ export default function StationMatrixPage() {
 
         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10, fontSize: 12, color: 'var(--text-disabled)' }}>
           <span>{filteredAirports.length} stations × {filteredReqs.length} docs</span>
-          <span>{airports.length} total stations</span>
+          <span>{airports.length} total</span>
         </div>
       </div>
       {editCell && <div onClick={() => setEditCell(null)} style={{ position: 'fixed', inset: 0, zIndex: 15 }} />}
