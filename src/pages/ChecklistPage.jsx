@@ -35,7 +35,7 @@ export default function ChecklistPage() {
 
   const fetchChecklist = useCallback(async () => {
     const dest = form.destination.toUpperCase().trim();
-    if (!dest) return { items: [], codPendingOk: false };
+    if (!dest) return { items: [], codPendingUnacceptable: false };
     const { data: requirements } = await supabase.from('requirements_matrix').select('*').eq('is_active', true).order('sort_order', { ascending: true });
     const filtered = (requirements || []).filter(r => {
       if (r.applies_to === 'BOTH' || r.applies_to === 'ALL') return true;
@@ -45,10 +45,10 @@ export default function ChecklistPage() {
     });
     const { data: airportReqs } = await supabase.from('airport_requirements').select('requirement_id, status, custom_note, cause_of_death_pending_ok').eq('airport_code', dest);
 
-    let items, codPendingOk = false;
+    let items, codPendingUnacceptable = false;
     if (airportReqs && airportReqs.length > 0) {
-      // Check if any record has cause_of_death_pending_ok
-      codPendingOk = airportReqs.some(a => a.cause_of_death_pending_ok);
+      // cause_of_death_pending_ok = true means COD pending is UNACCEPTABLE at this station
+      codPendingUnacceptable = airportReqs.some(a => a.cause_of_death_pending_ok);
       const m = new Map(airportReqs.map(a => [a.requirement_id, { status: a.status, custom_note: a.custom_note }]));
       items = filtered.filter(r => { const e = m.get(r.id); return e && e.status !== 'Not Required'; })
         .map(r => { const e = m.get(r.id); return { requirement_id: r.id, document_name: r.document_name, description: r.description, status: e.status, custom_note: e.custom_note || '', verification: '' }; });
@@ -60,12 +60,12 @@ export default function ChecklistPage() {
     }
     if (items.length === 0) items = filtered.map(r => ({ requirement_id: r.id, document_name: r.document_name, description: r.description, status: 'Required', custom_note: '', verification: '' }));
 
-    // If cause of death pending NOT ok, add a line item for it
-    if (!codPendingOk) {
-      items.push({ requirement_id: 'cod_check', document_name: 'Cause of Death Verification', description: 'Verify cause of death is listed on the death certificate', status: 'Required', custom_note: '', verification: '' });
+    // If COD pending is unacceptable at this station, add verification line item
+    if (codPendingUnacceptable) {
+      items.push({ requirement_id: 'cod_check', document_name: 'Cause of Death Verification', description: 'Verify cause of death is listed on the death certificate. Cause of death "Pending" is NOT acceptable for this destination.', status: 'Required', custom_note: 'COD Pending NOT accepted', verification: '' });
     }
 
-    return { items, codPendingOk };
+    return { items, codPendingUnacceptable };
   }, [form.destination, form.remainsType]);
 
   const handleGenerate = useCallback(async () => {
@@ -74,8 +74,8 @@ export default function ChecklistPage() {
     if (!getAirportName(form.destination)) { setError(`Destination "${form.destination}" is not a recognized airport code.`); return; }
     setError(''); setLoading(true);
     try {
-      const { items, codPendingOk } = await fetchChecklist();
-      setChecklistItems(items); setCauseOfDeathPendingOk(codPendingOk);
+      const { items, codPendingUnacceptable } = await fetchChecklist();
+      setChecklistItems(items); setCauseOfDeathPendingOk(codPendingUnacceptable);
       setCreatedAt(new Date().toISOString()); setNotes(''); setStep(STEP.CHECKLIST);
     } catch (err) { setError(`Failed: ${err.message}`); }
     finally { setLoading(false); }
@@ -84,10 +84,10 @@ export default function ChecklistPage() {
   const handleDoneEditing = async () => {
     setEditingSummary(false); setLoading(true);
     try {
-      const { items, codPendingOk } = await fetchChecklist();
+      const { items, codPendingUnacceptable } = await fetchChecklist();
       const prevMap = new Map(checklistItems.map(i => [i.requirement_id, i.verification]));
       setChecklistItems(items.map(item => ({ ...item, verification: prevMap.get(item.requirement_id) || '' })));
-      setCauseOfDeathPendingOk(codPendingOk);
+      setCauseOfDeathPendingOk(codPendingUnacceptable);
     } catch (err) { setError('Refresh failed: ' + err.message); }
     finally { setLoading(false); }
   };

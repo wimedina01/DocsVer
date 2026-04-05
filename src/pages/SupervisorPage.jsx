@@ -179,9 +179,9 @@ export default function SupervisorPage() {
                 <td><span className={`status-badge ${item.status === 'Required' ? 'status-badge--required' : 'status-badge--copies'}`}>{item.status}</span></td>
                 <td><span style={{ color: item.verification === 'Missing' ? 'var(--alert-red)' : 'var(--alert-green)', fontWeight: 600 }}>{item.verification || '—'}</span></td>
                 <td>{!signed ? (
-                  <select className={`verification-select ${verifications[idx] === 'Verified' ? 'verification-select--verified' : verifications[idx] === 'Missing' ? 'verification-select--missing' : ''}`}
+                  <select className={`verification-select ${verifications[idx] === 'Verified' ? 'verification-select--verified' : verifications[idx] === 'Manually Verified' ? 'verification-select--verified' : verifications[idx] === 'Missing' ? 'verification-select--missing' : ''}`}
                     value={verifications[idx] || ''} onChange={e => setVerifications(p => ({ ...p, [idx]: e.target.value }))}>
-                    <option value="">— Select —</option><option value="Verified">Verified</option><option value="Missing">Missing</option>
+                    <option value="">— Select —</option><option value="Verified">Verified</option><option value="Manually Verified">Manually Verified</option><option value="Missing">Missing</option>
                   </select>
                 ) : <span style={{ color: verifications[idx] === 'Missing' ? 'var(--alert-red)' : 'var(--alert-green)', fontWeight: 600 }}>{verifications[idx]}</span>}</td>
               </tr>

@@ -91,14 +91,20 @@ export function generateChecklistPDF(data) {
     },
     didDrawCell(h) {
       if (h.section === 'body' && h.column.index >= 4) {
-        const bx = h.cell.x + h.cell.width / 2 - 1.6, by = h.cell.y + h.cell.height / 2 - 1.6;
-        doc.setDrawColor(...MG); doc.setLineWidth(0.25); doc.rect(bx, by, 3.2, 3.2);
-        // Auto checkmark if supervisor signed this station
+        // Draw checkbox — bigger for visibility
+        const boxSize = 4;
+        const bx = h.cell.x + h.cell.width / 2 - boxSize / 2;
+        const by = h.cell.y + h.cell.height / 2 - boxSize / 2;
+        doc.setDrawColor(...MG); doc.setLineWidth(0.3); doc.rect(bx, by, boxSize, boxSize);
+        // Draw a prominent checkmark if supervisor signed this station
         if (supervisorId && supervisorStation) {
           const stIdx = h.column.index - 4;
           if (stations[stIdx] === supervisorStation) {
-            doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(...AG);
-            doc.text('\u2713', bx + 0.5, by + 2.8);
+            doc.setDrawColor(...AG); doc.setLineWidth(0.8);
+            // Draw checkmark as two lines: short down-right, then long up-right
+            const cx = bx + 0.8, cy = by + boxSize * 0.55;
+            doc.line(cx, cy, cx + boxSize * 0.3, cy + boxSize * 0.35); // short leg
+            doc.line(cx + boxSize * 0.3, cy + boxSize * 0.35, cx + boxSize * 0.85, cy - boxSize * 0.35); // long leg
           }
         }
       }

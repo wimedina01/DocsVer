@@ -76,7 +76,7 @@ export default function StationMatrixPage() {
       await supabase.from('airport_requirements').update({ cause_of_death_pending_ok: newVal }).eq('id', ar.id);
     }
     setAirportReqs(p => p.map(a => a.airport_code === code ? { ...a, cause_of_death_pending_ok: newVal } : a));
-    flash('success', `${code}: Cause of Death Pending ${newVal ? 'acceptable' : 'not acceptable'}`);
+    flash('success', `${code}: Cause of Death Pending ${newVal ? 'NOT acceptable — will require verification' : 'acceptable — no extra check needed'}`);
   };
 
   const handleAddAirport = async () => {
@@ -106,14 +106,14 @@ export default function StationMatrixPage() {
 
   // ── Download Excel Template ──
   const handleDownloadTemplate = () => {
-    const header = ['Station (3-letter code)', 'COD Pending OK (Y/N)', ...requirements.map(r => r.document_name)];
+    const header = ['Station (3-letter code)', 'COD Pending Unacceptable (Y/N)', ...requirements.map(r => r.document_name)];
     const instructions = ['INSTRUCTIONS:', '', ...requirements.map(() => '')];
-    const example = ['BOG', 'N', ...requirements.map(() => 'Required')];
+    const example = ['BOG', 'Y', ...requirements.map(() => 'Required')];
     const ws = XLSX.utils.aoa_to_sheet([
       ['Station Management Import Template — United Cargo HR Document Checklist'],
       ['Fill in station codes and set each document status. Valid statuses: Required, Required - Copies OK, Not Required'],
       ['To add a custom note, use format: Required | Note text here'],
-      ['COD Pending OK: Y = Cause of Death pending is acceptable, N = not acceptable'],
+      ['COD Pending Unacceptable: Y = Cause of Death "Pending" is NOT acceptable (adds verification check), N = acceptable'],
       [],
       header, example,
     ]);
@@ -125,7 +125,7 @@ export default function StationMatrixPage() {
 
   // ── Export ──
   const handleExport = () => {
-    const header = ['Station', 'City', 'COD Pending OK', ...requirements.map(r => r.document_name)];
+    const header = ['Station', 'City', 'COD Pending Unacceptable', ...requirements.map(r => r.document_name)];
     const rows = airports.map(c => {
       const codOk = airportReqs.filter(a => a.airport_code === c).some(a => a.cause_of_death_pending_ok) ? 'Y' : 'N';
       const row = [c, getAirportShort(c).split('(')[0].trim(), codOk];
@@ -293,9 +293,9 @@ export default function StationMatrixPage() {
                             <div style={{ fontSize: 8, color: 'var(--text-disabled)', fontWeight: 400 }}>{getAirportShort(code).split('(')[0].trim().slice(0, 22)}</div>
                           </div>
                           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <label title="Cause of Death Pending Acceptable" style={{ fontSize: 8, color: 'var(--text-disabled)', cursor: 'pointer' }}>COD</label>
+                            <label title="Check if Cause of Death Pending is NOT acceptable" style={{ fontSize: 8, color: codOk ? 'var(--alert-red)' : 'var(--text-disabled)', cursor: 'pointer', fontWeight: codOk ? 700 : 400 }}>COD</label>
                             <input type="checkbox" checked={codOk} onChange={() => handleToggleCodPending(code)}
-                              title="Cause of Death Pending Acceptable" style={{ cursor: 'pointer', accentColor: 'var(--united-blue)' }} />
+                              title="Check = COD Pending NOT acceptable" style={{ cursor: 'pointer', accentColor: 'var(--alert-red)' }} />
                             <button onClick={() => handleDeleteAirport(code)} title={`Remove ${code}`} style={{ background: 'none', border: 'none', color: 'var(--text-disabled)', cursor: 'pointer', fontSize: 11, marginLeft: 4 }}>×</button>
                           </div>
                         </div>
