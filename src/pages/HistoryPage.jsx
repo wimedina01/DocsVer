@@ -57,13 +57,18 @@ export default function HistoryPage() {
   });
 
   const handleReprint = (tx) => {
+    // Parse all supervisor signoffs for the PDF
+    let signoffs = [];
+    try { if (tx.supervisor_notes) signoffs = JSON.parse(tx.supervisor_notes); } catch (e) {}
+    if (signoffs.length === 0 && tx.supervisor_id) signoffs = [{ station: tx.origin, id: tx.supervisor_id, at: tx.supervisor_reviewed_at }];
+
     const pdf = generateChecklistPDF({
       awbNumber: tx.awb_number, origin: tx.origin, originDisplay: getAirportDisplay(tx.origin),
       destination: tx.destination, destinationDisplay: getAirportDisplay(tx.destination),
       routing: tx.routing, flightNumbers: tx.flight_numbers, shipmentType: tx.shipment_type,
       remainsType: tx.remains_type, checklistItems: tx.checklist_items, notes: '',
       employeeId: tx.employee_id || '', submittedAt: tx.submitted_at,
-      supervisorId: tx.supervisor_id || '', supervisorStation: tx.origin || '',
+      supervisorSignoffs: signoffs,
     });
     window.open(URL.createObjectURL(pdf.output('blob')), '_blank');
   };
@@ -89,8 +94,14 @@ export default function HistoryPage() {
       {searchFiltered.length === 0 ? <div className="alert alert--info">No transactions found.</div> : (
         <div style={{ overflowX: 'auto' }}>
           <table className="admin-table">
-            <thead><tr><th>Date</th><th>AWB</th><th>Route</th><th>Type</th><th>Agent</th><th>Status</th><th>Supervisor</th><th></th></tr></thead>
-            <tbody>{searchFiltered.map(tx => (
+            <thead><tr><th>Date</th><th>AWB</th><th>Route</th><th>Type</th><th>Agent</th><th>Status</th><th>Supervisors</th><th></th></tr></thead>
+            <tbody>{searchFiltered.map(tx => {
+              // Parse all supervisor signoffs
+              let signoffs = [];
+              try { if (tx.supervisor_notes) signoffs = JSON.parse(tx.supervisor_notes); } catch (e) {}
+              if (signoffs.length === 0 && tx.supervisor_id) signoffs = [{ station: '—', id: tx.supervisor_id, at: tx.supervisor_reviewed_at }];
+
+              return (
               <React.Fragment key={tx.id}>
                 <tr style={{ cursor: 'pointer' }} onClick={() => setExpanded(expanded === tx.id ? null : tx.id)}>
                   <td style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{new Date(tx.submitted_at).toLocaleString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
@@ -100,10 +111,12 @@ export default function HistoryPage() {
                   <td>{tx.employee_id || '—'}</td>
                   <td><span className={`status-badge ${tx.all_verified ? 'status-badge--not-required' : 'status-badge--required'}`}>{tx.all_verified ? 'Verified' : 'Missing'}</span></td>
                   <td style={{ fontSize: 11 }}>
-                    {tx.supervisor_id ? (
-                      <span style={{ color: 'var(--alert-green)', fontWeight: 600 }}>✓ {tx.supervisor_id}</span>
-                    ) : tx.override_by ? (
-                      <span style={{ color: 'var(--alert-yellow)', fontWeight: 600 }}>Override: {tx.override_by}</span>
+                    {signoffs.length > 0 ? signoffs.map((s, i) => (
+                      <div key={i} style={{ color: 'var(--alert-green)', fontWeight: 600 }}>
+                        ✓ {s.station} — {s.id}{s.manual ? ' (M)' : ''}
+                      </div>
+                    )) : tx.override_by ? (
+                      <span style={{ color: '#996B00', fontWeight: 600 }}>Override: {tx.override_by}</span>
                     ) : <span style={{ color: 'var(--text-disabled)' }}>Pending</span>}
                   </td>
                   <td><button className="btn btn--outline btn--sm" onClick={e => { e.stopPropagation(); handleReprint(tx); }}>Reprint</button></td>
@@ -114,28 +127,33 @@ export default function HistoryPage() {
                     <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, color: 'var(--united-blue)' }}>Transaction Timeline</div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
                       <div style={{ display: 'flex', gap: 12, fontSize: 13 }}>
-                        <span style={{ width: 140, color: 'var(--text-secondary)', fontWeight: 600 }}>Created:</span>
+                        <span style={{ width: 160, color: 'var(--text-secondary)', fontWeight: 600 }}>Created:</span>
                         <span>{new Date(tx.submitted_at).toLocaleString()}</span>
                       </div>
                       <div style={{ display: 'flex', gap: 12, fontSize: 13 }}>
-                        <span style={{ width: 140, color: 'var(--text-secondary)', fontWeight: 600 }}>Agent Verified:</span>
+                        <span style={{ width: 160, color: 'var(--text-secondary)', fontWeight: 600 }}>Agent Verified:</span>
                         <span>{tx.employee_id || '—'} — {new Date(tx.submitted_at).toLocaleString()}</span>
                       </div>
-                      {tx.supervisor_id && (
-                        <div style={{ display: 'flex', gap: 12, fontSize: 13 }}>
-                          <span style={{ width: 140, color: 'var(--text-secondary)', fontWeight: 600 }}>Supervisor Verified:</span>
-                          <span style={{ color: 'var(--alert-green)' }}>{tx.supervisor_id} — {tx.supervisor_reviewed_at ? new Date(tx.supervisor_reviewed_at).toLocaleString() : '—'}</span>
+                      {signoffs.map((s, i) => (
+                        <div key={i} style={{ display: 'flex', gap: 12, fontSize: 13 }}>
+                          <span style={{ width: 160, color: 'var(--text-secondary)', fontWeight: 600 }}>
+                            Supervisor — {s.station}:
+                          </span>
+                          <span style={{ color: 'var(--alert-green)' }}>
+                            {s.id} — {s.at ? new Date(s.at).toLocaleString() : '—'}
+                            {s.manual ? ' (Manual Verification)' : ' (Electronic)'}
+                          </span>
                         </div>
-                      )}
+                      ))}
                       {tx.override_by && (
                         <div style={{ display: 'flex', gap: 12, fontSize: 13 }}>
-                          <span style={{ width: 140, color: 'var(--text-secondary)', fontWeight: 600 }}>Override:</span>
-                          <span style={{ color: 'var(--alert-yellow)' }}>{tx.override_by} — {tx.override_at ? new Date(tx.override_at).toLocaleString() : '—'}</span>
+                          <span style={{ width: 160, color: 'var(--text-secondary)', fontWeight: 600 }}>Override:</span>
+                          <span style={{ color: '#996B00' }}>{tx.override_by} — {tx.override_at ? new Date(tx.override_at).toLocaleString() : '—'}</span>
                         </div>
                       )}
                       {tx.override_notes && (
                         <div style={{ display: 'flex', gap: 12, fontSize: 13 }}>
-                          <span style={{ width: 140, color: 'var(--text-secondary)', fontWeight: 600 }}>Override Notes:</span>
+                          <span style={{ width: 160, color: 'var(--text-secondary)', fontWeight: 600 }}>Override Notes:</span>
                           <span>{tx.override_notes}</span>
                         </div>
                       )}

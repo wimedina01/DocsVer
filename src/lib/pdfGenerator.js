@@ -2,12 +2,24 @@ import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 
 export function generateChecklistPDF(data) {
-  const { awbNumber, origin, originDisplay, destination, destinationDisplay, routing, flightNumbers, remainsType, checklistItems, notes, employeeId, submittedAt, supervisorId, supervisorStation } = data;
+  const { awbNumber, origin, originDisplay, destination, destinationDisplay, routing, flightNumbers, remainsType, checklistItems, notes, employeeId, submittedAt, supervisorSignoffs } = data;
 
   const doc = new jsPDF('portrait', 'mm', 'letter');
   const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
   const M = 12, L = M + 5, R = W - M - 5, CW = R - L;
   const DB = [5, 20, 100], AR = [213, 0, 50], AG = [27, 119, 66], DG = [36, 36, 36], MG = [85, 85, 85], LT = [247, 244, 242], MT = [215, 215, 212], WH = [255, 255, 255];
+
+  // Build signoff lookup: { stationCode: { id, at, manual } }
+  const signoffMap = {};
+  if (supervisorSignoffs) {
+    for (const s of supervisorSignoffs) {
+      signoffMap[s.station] = s;
+    }
+  }
+  // Legacy support for old single-supervisor format
+  if (data.supervisorId && data.supervisorStation && !signoffMap[data.supervisorStation]) {
+    signoffMap[data.supervisorStation] = { station: data.supervisorStation, id: data.supervisorId, at: new Date().toISOString() };
+  }
 
   let stations = [];
   if (routing) { const s = routing.replace(/\s*-\s*/g, ' ').trim().split(/\s+/).filter(Boolean).map(s => s.toUpperCase()); if (s.length > 1) stations = s.slice(0, -1); }
@@ -54,12 +66,11 @@ export function generateChecklistPDF(data) {
   y += 3.5; doc.setDrawColor(...AR); doc.setLineWidth(0.4); doc.line(L, y, R, y);
   y += 2;
 
-  // Table — custom notes formatted as "DocName & Note" on same line
+  // Table
   const headRow = ['#', 'Document Requirement', 'Status', 'Verification'];
   stations.forEach(c => headRow.push(c));
 
   const bodyRows = checklistItems.map((item, i) => {
-    // Format: "Document Name\n& Custom Note" — tight, no extra spacing
     let docText = item.document_name;
     if (item.custom_note) docText += '\n& ' + item.custom_note;
     const row = [(i + 1).toString(), docText, item.status || '', item.verification || ''];
@@ -83,29 +94,24 @@ export function generateChecklistPDF(data) {
         if (h.cell.raw === 'Missing') { h.cell.styles.textColor = AR; h.cell.styles.fontStyle = 'bold'; h.cell.styles.fillColor = [255, 230, 220]; }
         else if (h.cell.raw === 'Verified') { h.cell.styles.textColor = AG; h.cell.styles.fontStyle = 'bold'; h.cell.styles.fillColor = [220, 250, 230]; }
       }
-      // Ensure document column text has normal character spacing
-      if (h.section === 'body' && h.column.index === 1) {
-        h.cell.styles.overflow = 'linebreak';
-        h.cell.styles.fontSize = 8;
-      }
+      if (h.section === 'body' && h.column.index === 1) { h.cell.styles.overflow = 'linebreak'; h.cell.styles.fontSize = 8; }
     },
     didDrawCell(h) {
       if (h.section === 'body' && h.column.index >= 4) {
-        // Draw checkbox — bigger for visibility
         const boxSize = 4;
         const bx = h.cell.x + h.cell.width / 2 - boxSize / 2;
         const by = h.cell.y + h.cell.height / 2 - boxSize / 2;
         doc.setDrawColor(...MG); doc.setLineWidth(0.3); doc.rect(bx, by, boxSize, boxSize);
-        // Draw a prominent checkmark if supervisor signed this station
-        if (supervisorId && supervisorStation) {
-          const stIdx = h.column.index - 4;
-          if (stations[stIdx] === supervisorStation) {
-            doc.setDrawColor(...AG); doc.setLineWidth(0.8);
-            // Draw checkmark as two lines: short down-right, then long up-right
-            const cx = bx + 0.8, cy = by + boxSize * 0.55;
-            doc.line(cx, cy, cx + boxSize * 0.3, cy + boxSize * 0.35); // short leg
-            doc.line(cx + boxSize * 0.3, cy + boxSize * 0.35, cx + boxSize * 0.85, cy - boxSize * 0.35); // long leg
-          }
+
+        // Draw checkmark for ANY supervisor who signed this station
+        const stIdx = h.column.index - 4;
+        const stCode = stations[stIdx];
+        if (stCode && signoffMap[stCode]) {
+          // Draw green checkmark
+          doc.setDrawColor(...AG); doc.setLineWidth(0.9);
+          const cx = bx + 0.6, cy = by + boxSize * 0.5;
+          doc.line(cx, cy, cx + boxSize * 0.3, cy + boxSize * 0.4);
+          doc.line(cx + boxSize * 0.3, cy + boxSize * 0.4, cx + boxSize * 0.9, cy - boxSize * 0.4);
         }
       }
     },
@@ -136,7 +142,7 @@ export function generateChecklistPDF(data) {
   if (submittedAt) val(new Date(submittedAt).toLocaleString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }), c2 + 20, y);
   y += 5;
 
-  // Supervisor blocks
+  // Supervisor blocks — show ALL signoffs
   doc.setDrawColor(...AR); doc.setLineWidth(0.4); doc.line(L, y, R, y);
   y += 3; doc.setFillColor(...DB); doc.rect(L, y, CW, 5.5, 'F');
   doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(...WH);
@@ -146,13 +152,22 @@ export function generateChecklistPDF(data) {
   const bW = CW / Math.min(stations.length, 3), pr = Math.min(stations.length, 3);
   for (let i = 0; i < stations.length; i++) {
     const col = i % pr, row = Math.floor(i / pr), bx = L + col * bW + 2, by = y + row * 18;
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(...DB); doc.text(stations[i], bx, by);
-    doc.setDrawColor(...DB); doc.setLineWidth(0.4); doc.line(bx, by + 1, bx + doc.getTextWidth(stations[i]), by + 1);
+    const stCode = stations[i];
+    const signoff = signoffMap[stCode];
+
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(...DB); doc.text(stCode, bx, by);
+    doc.setDrawColor(...DB); doc.setLineWidth(0.4); doc.line(bx, by + 1, bx + doc.getTextWidth(stCode), by + 1);
     doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(...MG); doc.setDrawColor(...MG); doc.setLineWidth(0.15);
-    if (supervisorId && supervisorStation === stations[i]) {
-      doc.text('Signature:', bx, by + 5); doc.setTextColor(...DB); doc.text('ELECTRONICALLY SIGNED', bx + 15, by + 5); doc.setTextColor(...MG);
-      doc.text('ID:', bx, by + 9); doc.setTextColor(...DB); doc.text(supervisorId, bx + 6, by + 9); doc.setTextColor(...MG);
-      doc.text('Date:', bx, by + 13); doc.setTextColor(...DB); doc.text(new Date().toLocaleString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }), bx + 9, by + 13);
+
+    if (signoff) {
+      // Electronically signed
+      const sigLabel = signoff.manual ? 'MANUALLY VERIFIED' : 'ELECTRONICALLY SIGNED';
+      doc.text('Signature:', bx, by + 5); doc.setFont('helvetica', 'bold'); doc.setTextColor(...DB); doc.text(sigLabel, bx + 15, by + 5);
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(...MG);
+      doc.text('ID:', bx, by + 9); doc.setFont('helvetica', 'bold'); doc.setTextColor(...DB); doc.text(signoff.id, bx + 6, by + 9);
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(...MG);
+      doc.text('Date:', bx, by + 13); doc.setFont('helvetica', 'bold'); doc.setTextColor(...DB);
+      doc.text(new Date(signoff.at).toLocaleString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }), bx + 9, by + 13);
     } else {
       doc.text('Signature:', bx, by + 5); doc.line(bx + 15, by + 5.5, bx + 52, by + 5.5);
       doc.text('ID:', bx, by + 9); doc.line(bx + 6, by + 9.5, bx + 52, by + 9.5);
