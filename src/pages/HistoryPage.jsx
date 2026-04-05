@@ -170,7 +170,8 @@ export default function HistoryPage() {
                   </td></tr>
                 )}
               </React.Fragment>
-            ))}</tbody>
+            );
+            })}</tbody>
           </table>
         </div>
       )}
